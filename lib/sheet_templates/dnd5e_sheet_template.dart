@@ -239,13 +239,13 @@ class _CollapsingHeaderDelegate extends SliverPersistentHeaderDelegate {
     final range = maxExtent - minExtent;
     // 0 = fully expanded (top of the tab), 1 = fully collapsed.
     final t = range <= 0 ? 0.0 : (shrinkOffset / range).clamp(0.0, 1.0);
-    // The boxes (padding/margin/icon size) shrink all the way to half —
-    // `scale` — but the text inside them barely shrinks at all —
-    // `textScale` — so it stays legible even at minimum box size. Requested
-    // explicitly after the text became basically unreadable once the boxes
-    // themselves were shrinking the font in lockstep.
+    // The boxes (padding/margin) shrink all the way to half — `scale` —
+    // but the text and the HP card's -/+ icons barely shrink at all —
+    // `textScale`/`iconScale` — so both stay legible/tappable even at
+    // minimum box size instead of shrinking in lockstep with the padding.
     final scale = lerpDouble(1.0, 0.5, t)!;
     final textScale = lerpDouble(1.0, 0.9, t)!;
+    final iconScale = lerpDouble(1.0, 0.75, t)!;
 
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
@@ -271,6 +271,7 @@ class _CollapsingHeaderDelegate extends SliverPersistentHeaderDelegate {
                     onQuickAdjust: onQuickAdjust,
                     scale: scale,
                     textScale: textScale,
+                    iconScale: iconScale,
                   ),
                 ),
                 SizedBox(height: lerpDouble(_spacing, 0, t)),
@@ -376,13 +377,12 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// The HP/AC/Prof row — a small widget purely so it's built once (used
-/// only in the always-visible strip above the [TabBar] now — the name/class
-/// line and ability grid are the only things that collapse on scroll).
-/// The HP/AC/Prof row. [scale] (1.0 = full size, 0.5 = about half) drives
-/// font sizes/padding/icon sizes continuously as [_CollapsingHeaderDelegate]
-/// collapses, so it shrinks in step with the scroll instead of snapping
-/// between two fixed sizes.
+/// The HP/AC/Prof row, driven by three independent factors as
+/// [_CollapsingHeaderDelegate] collapses: [scale] shrinks box chrome
+/// (padding/margin) all the way to about half, while [textScale] and
+/// [iconScale] shrink text and the -/+ icons much more gently, so both
+/// stay legible/tappable even at minimum box size instead of shrinking in
+/// lockstep with the padding around them.
 class _StatRow extends StatelessWidget {
   final Map<String, dynamic> attributes;
   final int dexScore;
@@ -391,6 +391,7 @@ class _StatRow extends StatelessWidget {
   final _AdjustFn onQuickAdjust;
   final double scale;
   final double textScale;
+  final double iconScale;
 
   const _StatRow({
     required this.attributes,
@@ -400,6 +401,7 @@ class _StatRow extends StatelessWidget {
     required this.onQuickAdjust,
     this.scale = 1.0,
     this.textScale = 1.0,
+    this.iconScale = 1.0,
   });
 
   @override
@@ -419,6 +421,7 @@ class _StatRow extends StatelessWidget {
               onQuickAdjust: onQuickAdjust,
               scale: scale,
               textScale: textScale,
+              iconScale: iconScale,
             ),
           ),
           SizedBox(width: 8 * scale),
@@ -472,6 +475,7 @@ class _HpCard extends StatelessWidget {
   final _AdjustFn onQuickAdjust;
   final double scale;
   final double textScale;
+  final double iconScale;
 
   const _HpCard({
     required this.attributes,
@@ -479,6 +483,7 @@ class _HpCard extends StatelessWidget {
     required this.onQuickAdjust,
     this.scale = 1.0,
     this.textScale = 1.0,
+    this.iconScale = 1.0,
   });
 
   static const _path = 'system.attributes.hp.value';
@@ -487,13 +492,13 @@ class _HpCard extends StatelessWidget {
   // enforces a Material minimum 48dp tap target regardless of
   // constraints/padding, which breaks layout once this shrinks below that
   // while scrolling. Confirmed live.
-  static Widget _iconButton({required IconData icon, required VoidCallback onPressed, required double scale}) {
+  static Widget _iconButton({required IconData icon, required VoidCallback onPressed, required double iconScale}) {
     return InkWell(
       onTap: onPressed,
       customBorder: const CircleBorder(),
       child: Padding(
-        padding: EdgeInsets.all(3 * scale),
-        child: Icon(icon, size: 18 * scale),
+        padding: EdgeInsets.all(3 * iconScale),
+        child: Icon(icon, size: 18 * iconScale),
       ),
     );
   }
@@ -522,20 +527,48 @@ class _HpCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
             Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
               children: [
-                _iconButton(icon: Icons.remove_circle_outline, onPressed: () => onQuickAdjust(_path, -1), scale: scale),
-                Flexible(
-                  child: InkWell(
-                    onTap: () => onAdjust(_path, value),
-                    child: FittedBox(
-                      child: Text('${value.toInt()} / ${max.toInt()}',
-                          style: TextStyle(fontSize: 20 * textScale, fontWeight: FontWeight.bold)),
+                Expanded(
+                  child: Center(
+                    child: _iconButton(
+                      icon: Icons.remove_circle_outline,
+                      onPressed: () => onQuickAdjust(_path, -1),
+                      iconScale: iconScale,
                     ),
                   ),
                 ),
-                _iconButton(icon: Icons.add_circle_outline, onPressed: () => onQuickAdjust(_path, 1), scale: scale),
+                // Expanded (tight fit), not Flexible: a loose-fit child only
+                // reports its *actual* rendered size for Row's sequential
+                // layout, so when this text renders smaller than its flex
+                // share (the usual case), the following icon's Expanded
+                // slot would start right after that smaller width instead
+                // of at its true 3/5-of-row mark — collapsing both icons
+                // toward the middle instead of the card's edges. Expanded
+                // always reports its full flex share regardless of what the
+                // child inside actually uses, so Center+FittedBox render
+                // the glyphs at their natural size in the middle while the
+                // *slot* still reserves its true width for positioning.
+                Expanded(
+                  flex: 3,
+                  child: Center(
+                    child: InkWell(
+                      onTap: () => onAdjust(_path, value),
+                      child: FittedBox(
+                        child: Text('${value.toInt()} / ${max.toInt()}',
+                            style: TextStyle(fontSize: 20 * textScale, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Center(
+                    child: _iconButton(
+                      icon: Icons.add_circle_outline,
+                      onPressed: () => onQuickAdjust(_path, 1),
+                      iconScale: iconScale,
+                    ),
+                  ),
+                ),
               ],
             ),
             if (temp > 0 && scale > 0.7) Text('+$temp temp', style: TextStyle(fontSize: 11 * textScale)),

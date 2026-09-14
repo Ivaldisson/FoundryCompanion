@@ -321,6 +321,38 @@ actually usable day-to-day at the table, roughly in this order:
     before this change (`[48,792][704,1032]`) — the boxes genuinely didn't
     grow, only the text inside them did; no overflow anywhere across the
     full scroll range.
+- [x] ~~The HP card's -/+ circles should be a bit bigger when scrolled, and
+      centered between the text and the box edge — felt unbalanced,
+      crowded right up against the number~~ — done.
+  - Two changes: a new `iconScale` (`lerpDouble(1.0, 0.75, t)`, gentler
+    than `scale`'s 0.5 floor — same pattern as `textScale`) makes the
+    icons noticeably bigger at full collapse than before; and the Row
+    holding icon/number/icon was restructured from a tight, centered
+    cluster (`mainAxisSize.min` + `mainAxisAlignment.center`, icons
+    hugging the number) to three `Expanded` cells (icon | number | icon)
+    with each icon wrapped in `Center` — pushing them out toward the
+    card's edges instead of crowding the text.
+  - **Bug found immediately, live**: the first attempt used `Expanded` for
+    the icon cells but `Flexible` for the number cell, on the assumption
+    that `Flexible` would let the number stay at its natural (smaller)
+    size without stretching. It did — but `Flexible` (loose fit) reports
+    only its *actual rendered* size to `Row`'s layout for positioning
+    purposes, not its full flex-allotted share; since the number always
+    renders much narrower than its 3/5 share, the following `Expanded`
+    icon started right after that narrow actual width instead of at its
+    true position — both icons collapsed inward, nowhere near the edges,
+    looking scarcely different from before. Fixed by making the number
+    cell `Expanded` too (always reports its full flex share for
+    positioning) with `Center` + `FittedBox` inside so the *glyphs*
+    themselves still render at their natural size, centered within that
+    now-correctly-sized cell, rather than being stretched to fill it.
+  - Verified live on William's real sheet via a cropped/upscaled
+    screenshot (the same technique used to precisely locate the shrunk
+    tap targets earlier): icons are visibly bigger and sit symmetrically
+    centered in the gap between the number and each side of the card, at
+    both full size and fully collapsed; round-tripped HP `9/9` → `8/9` →
+    `9/9` using the repositioned, precisely-located icons to confirm they
+    stayed correctly tappable after the restructuring.
 
 ### Phase 2 — Player-facing parity with D&D Beyond
 - [ ] Rest handling: short/long rest actions that trigger the right resource resets.

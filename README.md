@@ -525,6 +525,33 @@ Prof text is now clearly legible; confirmed via `uiautomator dump` that
 the HP card's bounds are pixel-identical to before this change — the
 boxes genuinely didn't grow, only the text inside them did.
 
+## Phase 1.5g (bigger, better-positioned HP -/+ icons) — also verified live
+
+Last follow-up on this header: the HP card's -/+ circles felt cramped
+right up against the number once scrolled — too small, and hugging the
+text instead of sitting centered in the space between the number and the
+card's edges. Fixed with a new `iconScale` (shrinks much less than the
+box itself, the same pattern as `textScale`) plus a layout change from a
+tight, centered cluster to three equal `Expanded` cells (icon | number |
+icon), each icon centered within its own cell — pushing both out toward
+the card edges instead of crowding the text.
+
+The first attempt at that layout change used `Flexible` (not `Expanded`)
+for the number cell, expecting it to stay at its natural size without
+stretching — it did, but `Flexible`'s *actual rendered* size (not its
+full flex share) is what `Row` uses to position the next sibling, so the
+following icon collapsed inward instead of landing at its true position;
+both icons ended up barely different from before. Fixed by making the
+number cell `Expanded` too, with `Center` + `FittedBox` inside so the
+glyphs still render at natural size while the cell itself correctly
+reserves its full share for the following icon's position.
+
+Verified live via a cropped/upscaled screenshot (the same technique used
+earlier to precisely locate the shrunk tap targets): icons are visibly
+bigger and sit symmetrically centered in the gap between the number and
+each side of the card; round-tripped HP `9/9` → `8/9` → `9/9` using the
+repositioned icons to confirm they're still correctly tappable.
+
 ## Remaining before this is more than a PoC
 
 Nothing acceptance-critical is outstanding. The "Tab Layout Probe" test
