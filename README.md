@@ -1,11 +1,12 @@
-# Foundry Companion — PoC
+# Foundry Companion
 
-Flutter proof-of-concept for a system-agnostic FoundryVTT companion app.
-Talks to a self-hosted
+A system-agnostic Flutter companion app for FoundryVTT: view and edit
+your character sheet, roll dice, and follow the live chat log — all
+without hardcoding a single game system's fields. Talks to a self-hosted
 [`foundryvtt-rest-api-relay`](https://github.com/ThreeHats/foundryvtt-rest-api-relay)
 (Go relay) over plain HTTP/SSE.
 
-## What's implemented
+## Features
 
 - **Setup screen** (`lib/screens/config_screen.dart`) — enter relay URL + API
   key, test the connection via `GET /clients`, pick which connected Foundry
@@ -16,8 +17,8 @@ Talks to a self-hosted
   whatever JSON `GET /get` returns for an actor and builds a collapsible
   widget tree purely from each value's runtime type (map / list / number /
   bool / string / null). No D&D 5e (or any system) field names are
-  hardcoded — this is the core risk this PoC set out to prove, and it's
-  been tested against a real 5e actor payload (see below).
+  hardcoded — this is the core design constraint the whole app is built
+  around, and it's been tested against a real 5e actor payload (see below).
 - **Roll trigger** — every numeric leaf in the sheet is tappable; tapping
   opens a dialog pre-filled with a formula and the JSON path as flavor text,
   then `POST /roll` with `createChatMessage: true` and `speaker: <actor
@@ -82,8 +83,8 @@ stats for any game system generically.
 The relay *does* have a `/dnd5e/*` router with dedicated endpoints for
 things like spell slot consumption and inventory equip — using those would
 have been the easy path to a "nicer" inventory/spellcasting UI, but only
-for D&D 5e worlds. That's exactly the coupling this whole PoC exists to
-avoid, so writes go through the generic `/update`, `/increase`, `/decrease`,
+for D&D 5e worlds. That's exactly the coupling this app's system-agnostic
+design exists to avoid, so writes go through the generic `/update`, `/increase`, `/decrease`,
 and `/effects*` routes instead — all system-agnostic, none of them assume
 anything about what fields a "character" has.
 
@@ -169,7 +170,7 @@ needed.
   game-system-specific fields live, which is why the renderer has to be
   fully generic.
 
-## Out of scope for this PoC
+## Not yet built
 
 Auth/user management beyond the one API key (now in secure storage, see
 below), dedicated Inventory/Spellcasting screens, GM tools, push
@@ -249,7 +250,7 @@ compile/analyze/unit-test passes could have caught:
 
 ## Verified end-to-end, on-device, against the live relay
 
-All three PoC acceptance criteria confirmed on the actual compiled app
+All three original acceptance criteria confirmed on the actual compiled app
 (debug APK, installed via `adb install`, driven via `uiautomator`), not just
 curl:
 
@@ -284,7 +285,7 @@ relay side too, not just trusted from the app's own screen:
   → `GET /effects` showed it (`statuses: ["coverHalf"]`) → removed it via
   the chip's ✕ → `GET /effects` confirmed the list was empty again.
 - **Secure storage migration**: the already-configured test phone (from
-  the earlier PoC session, API key in plain `shared_preferences`) opened
+  an earlier session, API key in plain `shared_preferences`) opened
   straight to the actor list after installing the rebuilt app — no
   re-entering the key — confirming `RelayConfig`'s migration to
   `flutter_secure_storage` ran correctly against a real pre-existing install.
@@ -512,17 +513,20 @@ small; a small scroll-up from deep in a list (not just from the very top,
 thanks to `floating: true`) immediately starts restoring the header, and
 scrolling to the top restores it in full.
 
-## Remaining before this is more than a PoC
+## Status & what's next
 
-Nothing acceptance-critical is outstanding. The "Tab Layout Probe" test
-actor has since been removed (deleted directly in Foundry, since a
-curl-based delete would have needed reading the live API key out of the
-phone's encrypted storage, which was correctly refused as credential
-materialization) — future live sheet-template testing uses William's real
-character instead of fresh disposable probes where practical. Worth doing
-next: live-test item/spell-slot editing and the sheet template against a
-newly-populated actor, implement a `SheetTemplate` for a second system whenever there's a live
-world to test one against, decide whether to report the SSE fixture
-mismatch upstream to ThreeHats, and the out-of-scope items above (dedicated
-GM tools, push notifications, offline caching, real multi-user auth) once
-this grows past PoC scope. See `TODO.md` for the fuller roadmap.
+The core loop — dynamic system-agnostic rendering, a writable sheet, a
+full per-system template with live-verified UX, secure key storage, and
+live chat — is built and verified end-to-end against a real, self-hosted
+relay. The "Tab Layout Probe" test actor used for that verification has
+since been removed (deleted directly in Foundry, since a curl-based
+delete would have needed reading the live API key out of the phone's
+encrypted storage, which was correctly refused as credential
+materialization) — live sheet-template testing now uses William's real
+character instead of fresh disposable probes where practical.
+
+Next up: live-test item/spell-slot editing and the sheet template against
+a newly-populated actor, a `SheetTemplate` for a second system once
+there's a live world to test one against, and deciding whether to report
+the SSE fixture mismatch upstream to ThreeHats. See `TODO.md` for the
+fuller roadmap, including the larger not-yet-built items above.
