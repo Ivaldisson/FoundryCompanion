@@ -245,6 +245,63 @@ actually usable day-to-day at the table, roughly in this order:
     and ability grid while HP/AC/Prof stay pinned at their original full
     size above the tab bar (no shrinking); scrolling up restores the full
     header exactly as before, no overflow anywhere.
+- [x] ~~HP/AC/Prof should sit above the ability grid (not below it), stay
+      full size only when fully scrolled to the top, and actually shrink to
+      about half height while scrolling down (not stay static); also fix
+      int/wis/cha getting visually cut off by the HP/AC/Prof row~~ — done.
+  - Third correction in a row on this header, and the most specific: the
+    previous "done" above made HP/AC/Prof static (never shrinking) —
+    turned out that read the request backwards too. The actual ask: HP/AC/
+    Prof positioned above the ability grid (name → HP/AC/Prof → abilities,
+    not name → abilities → HP/AC/Prof), full size only at the very top of
+    a tab, and *continuously shrinking to about half height* as you scroll
+    down while the ability grid hides — not a static full-size row that
+    never changes.
+  - The "int/wis/cha cut off" report was a real, separate layout bug, not
+    just a symptom of the ordering: `SliverAppBar.flexibleSpace.background`
+    is laid out behind the app bar's pinned parts (toolbar + `bottom`), and
+    my budgeted `_collapsibleHeaderHeight` (222) was too small for
+    name + 2 rows of ability cards — the overflow was rendering *behind*
+    the opaque, always-on-top `bottom` strip (the HP/AC/Prof + TabBar),
+    which visually hid it. A sizing bug, same category as every previous
+    "guessed a height, it was too small" mistake on this header, just
+    manifesting as an overlap instead of a clip this time.
+  - `SliverAppBar`/`FlexibleSpaceBar` can't do a *continuously shrinking*
+    persistent element — `flexibleSpace.title` only supports a fixed-size
+    crossfade (and didn't even reserve space correctly, per the earlier
+    attempt), and `bottom` is a fixed `PreferredSize`, not something that
+    responds to scroll at all. Replaced both with a hand-written
+    `SliverPersistentHeaderDelegate` (`_CollapsingHeaderDelegate`), which
+    receives `shrinkOffset` directly: computes `t = shrinkOffset /
+    (maxExtent - minExtent)` clamped to [0,1], then a `_ClipToHeight`
+    helper (`SizedBox` + `ClipRect` + `OverflowBox`) clips the name row and
+    ability grid away to nothing as `t → 1`, while `_StatRow` gets a new
+    continuous `scale` parameter (`lerpDouble(1.0, 0.5, t)`) driving its
+    font sizes/padding/icon sizes directly — replacing the discrete
+    `compact` bool from the earlier (wrong) attempt. `maxExtent`/
+    `minExtent` are built algebraically from the same per-piece height
+    constants so the sum of the built children's heights exactly equals
+    the sliver's current extent at every `shrinkOffset`, with no leftover
+    slack to overflow or underflow.
+  - `_HpCard`'s icon buttons stayed on the plain `InkWell` approach from
+    the earlier compact attempt (not `IconButton`, which enforces a 48dp
+    minimum regardless of `constraints`) — now used at every scale, not
+    just a "compact" one, since scale is continuous rather than two fixed
+    states.
+  - All height constants re-measured live via `uiautomator dump` /
+    `wm density` the same way as every previous round; two were off on the
+    first try and corrected: `_abilitiesHeight` (168 → 176, overflowed by
+    6px) and, from the previous item, the general pattern of "guess, then
+    measure" repeating itself.
+  - Verified live on William's real sheet: HP/AC/Prof now render above the
+    ability grid (order: name, HP/AC/Prof, ability grid); at rest, all 6
+    ability cards are fully visible with no clipping/overlap; scrolling
+    down hides the name and ability grid completely while the HP/AC/Prof
+    boxes visibly shrink to about half their height, remaining fully
+    interactive (round-tripped HP `9/9` → `8/9` → `9/9` using the shrunk
+    -/+ buttons, precisely located via a cropped/upscaled screenshot rather
+    than guessed coordinates, since the shrunk tap targets are small);
+    scrolling back up restores everything to full size exactly as before.
 
 ### Phase 2 — Player-facing parity with D&D Beyond
 - [ ] Rest handling: short/long rest actions that trigger the right resource resets.

@@ -36,12 +36,12 @@ Talks to a self-hosted
 - **Optional per-system sheet template** (`lib/sheet_templates/`) — when the
   connected world's system is recognized, the actor screen renders a
   purpose-built, traditional-looking sheet instead of the generic tree: a
-  header where the name and ability score grid collapse away as you scroll
-  a tab's content (more room for what you're actually looking at) and
-  expand back on scroll-up, while the HP/AC/Prof boxes stay pinned at the
-  top at their original full size the whole time — never hidden, shrunk,
-  or replaced by a text summary — then a tab bar (Skills & Saves, Inventory, Spells, Features,
-  Raw Data). The generic tree is still
+  header, ordered name → HP/AC/Prof → ability scores: scrolling a tab's
+  content clips the name and ability grid away to nothing while the
+  HP/AC/Prof boxes shrink continuously to about half height (more room for
+  what you're actually looking at, HP/AC/Prof always in reach), then
+  expand back to full size on scroll-up, then a tab bar (Skills & Saves,
+  Inventory, Spells, Features, Raw Data). The generic tree is still
   there underneath, unfiltered, as the "Raw Data" tab — the fallback for
   any system without a template, and the guarantee that a template never
   hides data it doesn't specifically surface. `Dnd5eSheetTemplate` is the
@@ -465,6 +465,49 @@ Verified live on William's real sheet: scrolling down hides the name and
 ability grid while HP/AC/Prof stay pinned at their original full size,
 unchanged, above the tab bar; scrolling up restores the full header
 exactly as before, with no overflow anywhere.
+
+## Phase 1.5e (HP/AC/Prof above the ability grid, and actually shrinking) — also verified live
+
+A third round on this same header, and the most specific correction yet:
+HP/AC/Prof needed to sit *above* the ability grid (name → HP/AC/Prof →
+abilities, not the other way around), stay full size only when fully
+scrolled to the top, and *continuously shrink to about half height* while
+scrolling down — the previous fix made them static, which (again) wasn't
+the ask. There was also a real, separate bug in the same area: with
+HP/AC/Prof below the ability grid, INT/WIS/CHA were getting visually cut
+off. Root cause: `SliverAppBar.flexibleSpace.background` renders behind
+the app bar's pinned parts (toolbar + `bottom`), and the height budgeted
+for name + ability grid was a bit too small — the overflow was rendering
+*behind* the always-on-top HP/AC/Prof + `TabBar` strip, hiding it, the
+same "guessed a height, it was too small" mistake as every previous round
+on this header, just manifesting as an overlap instead of a clip.
+
+`SliverAppBar`/`FlexibleSpaceBar` can't do a *continuously* shrinking
+persistent element at all — `flexibleSpace.title` only supports a
+fixed-size crossfade (and didn't reserve space correctly even for that,
+per the first attempt at this header), and `bottom` is a fixed
+`PreferredSize`, not scroll-aware. Replaced both with a hand-written
+`SliverPersistentHeaderDelegate` (`_CollapsingHeaderDelegate`), which gets
+`shrinkOffset` directly: computes a collapse fraction `t` from it, then a
+small `_ClipToHeight` helper (`SizedBox` + `ClipRect` + `OverflowBox`)
+clips the name row and ability grid away to nothing as `t → 1`, while
+`_StatRow` gained a continuous `scale` parameter
+(`lerpDouble(1.0, 0.5, t)`) driving its font sizes/padding/icon sizes
+directly, replacing the discrete `compact` bool from the earlier (wrong)
+attempt. `maxExtent`/`minExtent` are built algebraically from the same
+per-piece height constants so the built content's height exactly equals
+the sliver's current extent at every scroll position, with no slack to
+overflow.
+
+Verified live on William's real sheet: HP/AC/Prof now render above the
+ability grid; at rest, all 6 ability cards are fully visible (the
+INT/WIS/CHA clipping is gone); scrolling down hides the name and ability
+grid completely while HP/AC/Prof visibly shrink to about half height,
+staying fully interactive — round-tripped HP `9/9` → `8/9` → `9/9` using
+the shrunk -/+ buttons, located precisely via a cropped and upscaled
+screenshot rather than a guessed tap coordinate, since the shrunk targets
+are small; scrolling back up restores everything to full size exactly as
+before.
 
 ## Remaining before this is more than a PoC
 

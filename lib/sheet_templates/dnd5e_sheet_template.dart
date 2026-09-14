@@ -1,3 +1,5 @@
+import 'dart:ui' show lerpDouble;
+
 import 'package:flutter/material.dart';
 
 import 'dnd5e_formulas.dart';
@@ -37,25 +39,6 @@ const _skillLabels = {
 typedef _RollFn = void Function({required String title, required String defaultFormula, required String defaultFlavor});
 typedef _AdjustFn = void Function(String path, num value, {String? targetUuid});
 typedef _EditLeafFn = void Function(String path, dynamic currentValue, {String? targetUuid});
-
-/// Height of the always-visible HP/AC/Prof stat row pinned above the
-/// [TabBar], as part of the [SliverAppBar]'s `bottom` — full size, same as
-/// it always was; only the name/class line and ability grid collapse away.
-/// Measured on-device rather than computed from font metrics (which
-/// undershot badly the first time this header was built — `Card`'s
-/// default margin and real line heights run bigger than estimated).
-const _statRowHeight = 104.0;
-
-/// Height of the part of the header that collapses away entirely on
-/// scroll: just the name/class line and the ability score grid — HP/AC/
-/// Prof live in the always-visible [_statRowHeight] row below and never
-/// collapse. Also measured on-device.
-const _collapsibleHeaderHeight = 222.0;
-
-/// Total expanded height of the [SliverAppBar]: the collapsible part plus
-/// the always-visible stat row and [TabBar] (the `bottom`), which stay
-/// reserved even at full collapse.
-const _headerExpandedHeight = _collapsibleHeaderHeight + _statRowHeight + kTextTabBarHeight;
 
 String _formatAc(Map<String, dynamic> ac, int dexScore) {
   final calc = ac['calc'] as String?;
@@ -122,82 +105,21 @@ class Dnd5eSheetTemplate implements SheetTemplate {
         headerSliverBuilder: (context, innerBoxIsScrolled) => [
           SliverOverlapAbsorber(
             handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
-            sliver: SliverAppBar(
-              automaticallyImplyLeading: false,
-              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-              elevation: 0,
-              forceElevated: innerBoxIsScrolled,
+            sliver: SliverPersistentHeader(
               pinned: true,
               floating: true,
-              expandedHeight: _headerExpandedHeight,
-              // Only the name/class line and ability grid collapse away —
-              // HP/AC/Prof live in the always-visible compact row in
-              // `bottom` below, not duplicated up here.
-              flexibleSpace: FlexibleSpaceBar(
-                background: SingleChildScrollView(
-                  // Never actually scrolls (the outer NestedScrollView owns
-                  // scrolling) — just lets the background lay out at its
-                  // natural height without a RenderFlex overflow error if
-                  // _collapsibleHeaderHeight is ever a bit too tight.
-                  physics: const NeverScrollableScrollPhysics(),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-                    child: Column(
-                      children: [
-                        _Header(
-                          name: ctx.actor['name'] as String? ?? '',
-                          level: level,
-                          classLine: _classLine(items),
-                          onEditName: () => ctx.onEditLeaf('name', ctx.actor['name']),
-                        ),
-                        const SizedBox(height: 12),
-                        _AbilitiesGrid(abilities: abilities, onRoll: ctx.onRoll, onAdjust: ctx.onAdjust),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              // A persistent, always-pinned strip below the collapsible
-              // header: the HP/AC/Prof boxes at full size (never shrunk —
-              // only the name/class line and ability grid above collapse
-              // away), then the TabBar. (An earlier version shrank these
-              // boxes down here, and an even earlier one replaced them with
-              // a plain text summary via FlexibleSpaceBar's `title` — that
-              // crossfade reservation didn't hold up under NestedScrollView
-              // in practice, so this is a plain always-visible row.)
-              bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(_statRowHeight + kTextTabBarHeight),
-                child: ColoredBox(
-                  color: Theme.of(context).scaffoldBackgroundColor,
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        height: _statRowHeight,
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                          child: _StatRow(
-                            attributes: attributes,
-                            dexScore: dexScore,
-                            prof: prof,
-                            onAdjust: ctx.onAdjust,
-                            onQuickAdjust: ctx.onQuickAdjust,
-                          ),
-                        ),
-                      ),
-                      const TabBar(
-                        isScrollable: true,
-                        tabAlignment: TabAlignment.start,
-                        tabs: [
-                          Tab(text: 'Skills & Saves'),
-                          Tab(text: 'Inventory'),
-                          Tab(text: 'Spells'),
-                          Tab(text: 'Features'),
-                          Tab(text: 'Raw Data'),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
+              delegate: _CollapsingHeaderDelegate(
+                name: ctx.actor['name'] as String? ?? '',
+                level: level,
+                classLine: _classLine(items),
+                onEditName: () => ctx.onEditLeaf('name', ctx.actor['name']),
+                abilities: abilities,
+                attributes: attributes,
+                dexScore: dexScore,
+                prof: prof,
+                onRoll: ctx.onRoll,
+                onAdjust: ctx.onAdjust,
+                onQuickAdjust: ctx.onQuickAdjust,
               ),
             ),
           ),
@@ -251,6 +173,156 @@ class Dnd5eSheetTemplate implements SheetTemplate {
   }
 }
 
+/// Drives the collapsing header as a custom sliver instead of
+/// `SliverAppBar`/`FlexibleSpaceBar`: at rest (top of a tab), name/class
+/// line + full-size HP/AC/Prof + ability grid are all visible. Scrolling
+/// down clips the name and ability grid away to nothing while the stat row
+/// shrinks continuously to about half height — never disappearing, always
+/// reachable above the `TabBar` — then scrolling back up reverses all of
+/// it. `SliverAppBar`'s own `flexibleSpace.title`/`bottom` weren't enough
+/// for this: a `title` crossfade didn't reserve space correctly once
+/// collapsed (tried and abandoned earlier), and `bottom` is a fixed size,
+/// not something that can shrink with scroll — hence a hand-written
+/// `SliverPersistentHeaderDelegate`, which gets `shrinkOffset` directly and
+/// can size/scale its own content by it.
+class _CollapsingHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final String name;
+  final int level;
+  final String? classLine;
+  final VoidCallback onEditName;
+  final Map<String, dynamic> abilities;
+  final Map<String, dynamic> attributes;
+  final int dexScore;
+  final int prof;
+  final _RollFn onRoll;
+  final _AdjustFn onAdjust;
+  final _AdjustFn onQuickAdjust;
+
+  _CollapsingHeaderDelegate({
+    required this.name,
+    required this.level,
+    required this.classLine,
+    required this.onEditName,
+    required this.abilities,
+    required this.attributes,
+    required this.dexScore,
+    required this.prof,
+    required this.onRoll,
+    required this.onAdjust,
+    required this.onQuickAdjust,
+  });
+
+  // All measured live on-device (`uiautomator dump` bounds), not computed
+  // from font metrics — guesses undershot badly every time this header's
+  // been built, since Card's default margin and real line heights run
+  // bigger than expected.
+  static const _topPadding = 12.0;
+  static const _nameHeight = 64.0;
+  static const _spacing = 12.0;
+  static const _statRowFullHeight = 104.0;
+  static const _statRowHalfHeight = 60.0;
+  static const _abilitiesHeight = 176.0;
+
+  // _topPadding is constant regardless of scroll (the Column's fixed top
+  // inset in `build()`), so it's added equally to both extents — keeps the
+  // linear "content height sums to exactly currentExtent at every
+  // shrinkOffset" invariant `build()` relies on to avoid over/underflow.
+  @override
+  double get maxExtent =>
+      _topPadding + _nameHeight + _spacing + _statRowFullHeight + _spacing + _abilitiesHeight + kTextTabBarHeight;
+
+  @override
+  double get minExtent => _topPadding + _statRowHalfHeight + kTextTabBarHeight;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final range = maxExtent - minExtent;
+    // 0 = fully expanded (top of the tab), 1 = fully collapsed.
+    final t = range <= 0 ? 0.0 : (shrinkOffset / range).clamp(0.0, 1.0);
+    final scale = lerpDouble(1.0, 0.5, t)!;
+
+    return ColoredBox(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: Column(
+              children: [
+                _ClipToHeight(
+                  height: lerpDouble(_nameHeight, 0, t)!,
+                  naturalHeight: _nameHeight,
+                  child: _Header(name: name, level: level, classLine: classLine, onEditName: onEditName),
+                ),
+                SizedBox(height: lerpDouble(_spacing, 0, t)),
+                SizedBox(
+                  height: lerpDouble(_statRowFullHeight, _statRowHalfHeight, t),
+                  child: _StatRow(
+                    attributes: attributes,
+                    dexScore: dexScore,
+                    prof: prof,
+                    onAdjust: onAdjust,
+                    onQuickAdjust: onQuickAdjust,
+                    scale: scale,
+                  ),
+                ),
+                SizedBox(height: lerpDouble(_spacing, 0, t)),
+                _ClipToHeight(
+                  height: lerpDouble(_abilitiesHeight, 0, t)!,
+                  naturalHeight: _abilitiesHeight,
+                  child: _AbilitiesGrid(abilities: abilities, onRoll: onRoll, onAdjust: onAdjust),
+                ),
+              ],
+            ),
+          ),
+          const TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            tabs: [
+              Tab(text: 'Skills & Saves'),
+              Tab(text: 'Inventory'),
+              Tab(text: 'Spells'),
+              Tab(text: 'Features'),
+              Tab(text: 'Raw Data'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _CollapsingHeaderDelegate oldDelegate) => true;
+}
+
+/// Renders [child] at its natural size but only shows the top [height] of
+/// it, clipping the rest — how the name row and ability grid appear to
+/// shrink away as [_CollapsingHeaderDelegate] collapses, without needing
+/// [child] itself to know about scroll state.
+class _ClipToHeight extends StatelessWidget {
+  final double height;
+  final double naturalHeight;
+  final Widget child;
+
+  const _ClipToHeight({required this.height, required this.naturalHeight, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (height <= 0) return const SizedBox.shrink();
+    return SizedBox(
+      height: height,
+      child: ClipRect(
+        child: OverflowBox(
+          alignment: Alignment.topCenter,
+          minHeight: 0,
+          maxHeight: naturalHeight,
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
 class _SectionLabel extends StatelessWidget {
   final String text;
   const _SectionLabel(this.text);
@@ -300,12 +372,17 @@ class _Header extends StatelessWidget {
 /// The HP/AC/Prof row — a small widget purely so it's built once (used
 /// only in the always-visible strip above the [TabBar] now — the name/class
 /// line and ability grid are the only things that collapse on scroll).
+/// The HP/AC/Prof row. [scale] (1.0 = full size, 0.5 = about half) drives
+/// font sizes/padding/icon sizes continuously as [_CollapsingHeaderDelegate]
+/// collapses, so it shrinks in step with the scroll instead of snapping
+/// between two fixed sizes.
 class _StatRow extends StatelessWidget {
   final Map<String, dynamic> attributes;
   final int dexScore;
   final int prof;
   final _AdjustFn onAdjust;
   final _AdjustFn onQuickAdjust;
+  final double scale;
 
   const _StatRow({
     required this.attributes,
@@ -313,6 +390,7 @@ class _StatRow extends StatelessWidget {
     required this.prof,
     required this.onAdjust,
     required this.onQuickAdjust,
+    this.scale = 1.0,
   });
 
   @override
@@ -326,12 +404,12 @@ class _StatRow extends StatelessWidget {
         children: [
           Expanded(
             flex: 2,
-            child: _HpCard(attributes: attributes, onAdjust: onAdjust, onQuickAdjust: onQuickAdjust),
+            child: _HpCard(attributes: attributes, onAdjust: onAdjust, onQuickAdjust: onQuickAdjust, scale: scale),
           ),
-          const SizedBox(width: 8),
-          Expanded(child: _AcCard(attributes: attributes, dexScore: dexScore)),
-          const SizedBox(width: 8),
-          Expanded(child: _StatCard(label: 'Prof', value: '+$prof')),
+          SizedBox(width: 8 * scale),
+          Expanded(child: _AcCard(attributes: attributes, dexScore: dexScore, scale: scale)),
+          SizedBox(width: 8 * scale),
+          Expanded(child: _StatCard(label: 'Prof', value: '+$prof', scale: scale)),
         ],
       ),
     );
@@ -341,21 +419,30 @@ class _StatRow extends StatelessWidget {
 class _StatCard extends StatelessWidget {
   final String label;
   final String value;
+  final double scale;
 
-  const _StatCard({required this.label, required this.value});
+  const _StatCard({required this.label, required this.value, this.scale = 1.0});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Card(
+      margin: EdgeInsets.symmetric(vertical: 4 * scale),
       color: scheme.surfaceContainerHigh,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        padding: EdgeInsets.symmetric(vertical: 12 * scale, horizontal: 8 * scale),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600]), textAlign: TextAlign.center),
+            Text(value, style: TextStyle(fontSize: 22 * scale, fontWeight: FontWeight.bold)),
+            Text(
+              label,
+              style: TextStyle(fontSize: 11 * scale, color: Colors.grey[600]),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ),
       ),
@@ -367,18 +454,29 @@ class _HpCard extends StatelessWidget {
   final Map<String, dynamic> attributes;
   final _AdjustFn onAdjust;
   final _AdjustFn onQuickAdjust;
+  final double scale;
 
-  const _HpCard({required this.attributes, required this.onAdjust, required this.onQuickAdjust});
+  const _HpCard({
+    required this.attributes,
+    required this.onAdjust,
+    required this.onQuickAdjust,
+    this.scale = 1.0,
+  });
 
   static const _path = 'system.attributes.hp.value';
 
-  static Widget _iconButton({required IconData icon, required VoidCallback onPressed}) {
-    return IconButton(
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-      iconSize: 18,
-      onPressed: onPressed,
-      icon: Icon(icon),
+  // Plain InkWell+Icon rather than IconButton at every scale: IconButton
+  // enforces a Material minimum 48dp tap target regardless of
+  // constraints/padding, which breaks layout once this shrinks below that
+  // while scrolling. Confirmed live.
+  static Widget _iconButton({required IconData icon, required VoidCallback onPressed, required double scale}) {
+    return InkWell(
+      onTap: onPressed,
+      customBorder: const CircleBorder(),
+      child: Padding(
+        padding: EdgeInsets.all(3 * scale),
+        child: Icon(icon, size: 18 * scale),
+      ),
     );
   }
 
@@ -391,31 +489,38 @@ class _HpCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
 
     return Card(
+      margin: EdgeInsets.symmetric(vertical: 4 * scale),
       color: scheme.errorContainer.withValues(alpha: 0.35),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+        padding: EdgeInsets.symmetric(vertical: 8 * scale, horizontal: 8 * scale),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('Hit Points', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+            Text(
+              'Hit Points',
+              style: TextStyle(fontSize: 11 * scale, color: Colors.grey[600]),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               mainAxisSize: MainAxisSize.min,
               children: [
-                _iconButton(icon: Icons.remove_circle_outline, onPressed: () => onQuickAdjust(_path, -1)),
+                _iconButton(icon: Icons.remove_circle_outline, onPressed: () => onQuickAdjust(_path, -1), scale: scale),
                 Flexible(
                   child: InkWell(
                     onTap: () => onAdjust(_path, value),
                     child: FittedBox(
                       child: Text('${value.toInt()} / ${max.toInt()}',
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                          style: TextStyle(fontSize: 20 * scale, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ),
-                _iconButton(icon: Icons.add_circle_outline, onPressed: () => onQuickAdjust(_path, 1)),
+                _iconButton(icon: Icons.add_circle_outline, onPressed: () => onQuickAdjust(_path, 1), scale: scale),
               ],
             ),
-            if (temp > 0) Text('+$temp temp', style: const TextStyle(fontSize: 11)),
+            if (temp > 0 && scale > 0.7) Text('+$temp temp', style: TextStyle(fontSize: 11 * scale)),
           ],
         ),
       ),
@@ -426,8 +531,9 @@ class _HpCard extends StatelessWidget {
 class _AcCard extends StatelessWidget {
   final Map<String, dynamic> attributes;
   final int dexScore;
+  final double scale;
 
-  const _AcCard({required this.attributes, required this.dexScore});
+  const _AcCard({required this.attributes, required this.dexScore, this.scale = 1.0});
 
   @override
   Widget build(BuildContext context) {
@@ -436,6 +542,7 @@ class _AcCard extends StatelessWidget {
     return _StatCard(
       label: computed == null ? 'AC (see raw data)' : 'Armor Class',
       value: _formatAc(ac, dexScore),
+      scale: scale,
     );
   }
 }
