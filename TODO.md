@@ -380,7 +380,7 @@ actually usable day-to-day at the table, roughly in this order:
       right now it's a single shared API key with no per-user identity or permissions.
 
 ### Phase 5 — Ship it
-- [ ] Cloudflare Tunnel for the relay (`wss://foundry-relay.shakycomma.org`) so the
+- [ ] Cloudflare Tunnel for the relay (`wss://<planned-subdomain>`) so the
       app works off the home network — and flip `usesCleartextTraffic` back to false
       once that's TLS end-to-end.
 - [ ] README with setup instructions, screenshots, and a clear "unofficial fan
@@ -423,7 +423,7 @@ actually usable day-to-day at the table, roughly in this order:
 - [ ] Explore the relay endpoints not yet touched by the app: `GET /rolls`/`GET /lastroll` (roll history), `/structure` + folders (for actor organization once there's more than one). (`GET /sheet` was explored — it's a PNG/JPEG screenshot, not JSON; see Phase 1 above. Could still be worth showing as a supplementary visual, but it's not a data source.)
 - [ ] Live-test the generic leaf-editing mechanism (Phase 1) against an actor that actually has items and prepared spells — the probe actor used to verify it was a fresh level-1 character with neither, so `items[i].system.quantity/equipped` and `system.spells.spell1-9` edits are implemented but not independently confirmed live yet.
 - [ ] From the brief's own "onthouden voor later" list, once this grows past PoC scope: auth layer for multiple players, offline-first caching, GM dashboard (initiative tracker, NPC lookup, player status).
-- [ ] Get the relay reachable externally via the planned Cloudflare Tunnel (`wss://foundry-relay.shakycomma.org`) — needed before testing the app off the home network. When that happens, revisit `android:usesCleartextTraffic="true"` in `android/app/src/main/AndroidManifest.xml`, since the tunnel would be TLS.
+- [ ] Get the relay reachable externally via the planned Cloudflare Tunnel (`wss://<planned-subdomain>`) — needed before testing the app off the home network. When that happens, revisit `android:usesCleartextTraffic="true"` in `android/app/src/main/AndroidManifest.xml`, since the tunnel would be TLS.
 
 ## Bugs
 
