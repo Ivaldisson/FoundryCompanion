@@ -387,12 +387,14 @@ attribute, not just eyeballing a screenshot):
 
 ## Remaining before this is more than a PoC
 
-Nothing acceptance-critical is outstanding. Worth doing next: delete the
-"Tab Layout Probe" test actor left in the world (blocked only on having the
-live API key in hand — reading it out of the phone's encrypted storage was
-correctly refused as credential materialization), live-test
-item/spell-slot editing and the sheet template against a populated actor,
-implement a `SheetTemplate` for a second system whenever there's a live
+Nothing acceptance-critical is outstanding. The "Tab Layout Probe" test
+actor has since been removed (deleted directly in Foundry, since a
+curl-based delete would have needed reading the live API key out of the
+phone's encrypted storage, which was correctly refused as credential
+materialization) — future live sheet-template testing uses William's real
+character instead of fresh disposable probes where practical. Worth doing
+next: live-test item/spell-slot editing and the sheet template against a
+newly-populated actor, implement a `SheetTemplate` for a second system whenever there's a live
 world to test one against, decide whether to report the SSE fixture
 mismatch upstream to ThreeHats, and the out-of-scope items above (dedicated
 GM tools, push notifications, offline caching, real multi-user auth) once

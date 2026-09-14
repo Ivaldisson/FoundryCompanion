@@ -213,15 +213,16 @@ actually usable day-to-day at the table, roughly in this order:
     "Unknown world" fallback, and the dnd5e template's "Raw Data"/"AC (see
     raw data)" strings. `test/widget_test.dart` updated to match the
     renamed "Relay URL" field label.
-- [ ] Delete the "Tab Layout Probe" test actor (`Actor.PkanG6DRZOSDeUQk`)
-      from the test world now that the tabbed-layout work above is verified
-      — same pattern as the other probe actors above (`DELETE /delete`), but
-      not done yet: doing it via curl needs the live API key, which lives
-      only in the phone's encrypted `flutter_secure_storage` and was
-      correctly refused when reading it directly off the device was
-      attempted (credential materialization). Delete it the same way as
-      before (ask for the key, or delete via Foundry's own UI) next time
-      there's a live pass against the relay.
+- [x] ~~Delete the "Tab Layout Probe" test actor (`Actor.PkanG6DRZOSDeUQk`)
+      from the test world now that the tabbed-layout work above is verified~~
+      — deleted.
+  - Unlike the previous probe actors, this one was removed directly in
+    Foundry's own UI by the user rather than via `DELETE /delete` — the
+    live API key needed for a curl-based delete lives only in the phone's
+    encrypted `flutter_secure_storage`, and reading it directly off the
+    device was correctly refused as credential materialization. Going
+    forward, live sheet-template testing uses William's real character
+    instead of freshly-created disposable probe actors where practical.
 - [ ] Consider reporting the SSE fixture mismatch upstream to ThreeHats (`foundryvtt-rest-api-relay`) — see Bugs below.
 - [ ] Explore the relay endpoints not yet touched by the app: `GET /rolls`/`GET /lastroll` (roll history), `/structure` + folders (for actor organization once there's more than one). (`GET /sheet` was explored — it's a PNG/JPEG screenshot, not JSON; see Phase 1 above. Could still be worth showing as a supplementary visual, but it's not a data source.)
 - [ ] Live-test the generic leaf-editing mechanism (Phase 1) against an actor that actually has items and prepared spells — the probe actor used to verify it was a fresh level-1 character with neither, so `items[i].system.quantity/equipped` and `system.spells.spell1-9` edits are implemented but not independently confirmed live yet.
