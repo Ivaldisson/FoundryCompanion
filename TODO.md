@@ -302,6 +302,25 @@ actually usable day-to-day at the table, roughly in this order:
     -/+ buttons, precisely located via a cropped/upscaled screenshot rather
     than guessed coordinates, since the shrunk tap targets are small);
     scrolling back up restores everything to full size exactly as before.
+- [x] ~~Text inside the shrunk HP/AC/Prof boxes was basically illegible —
+      make it bigger without growing the boxes themselves~~ — done.
+  - With `scale` (0.5 at full collapse) driving both the box chrome
+    (padding/margin/icon size) *and* the font sizes together, the text at
+    minimum size was tiny (e.g. an 11pt label became ~5.5pt) — the boxes
+    had comfortably enough room for bigger text at that size, just not
+    text that shrank in lockstep with the padding around it.
+  - Split into two independent factors on `_StatRow`/`_StatCard`/`_HpCard`:
+    `scale` keeps shrinking box padding/margin/icon size down to 0.5 as
+    before (so the boxes themselves are unchanged from the previous item),
+    while a new `textScale` (`lerpDouble(1.0, 0.9, t)`) drives font sizes
+    almost independently of the collapse — barely shrinking at all, so
+    text stays close to full-size and legible even in the smallest boxes.
+  - Verified live on William's real sheet: at full collapse, "13"/"Armor
+    Class"/"+2"/"Prof"/"9 / 9" are all clearly legible; confirmed via
+    `uiautomator dump` that the HP card's bounds are pixel-identical to
+    before this change (`[48,792][704,1032]`) — the boxes genuinely didn't
+    grow, only the text inside them did; no overflow anywhere across the
+    full scroll range.
 
 ### Phase 2 — Player-facing parity with D&D Beyond
 - [ ] Rest handling: short/long rest actions that trigger the right resource resets.

@@ -509,6 +509,22 @@ screenshot rather than a guessed tap coordinate, since the shrunk targets
 are small; scrolling back up restores everything to full size exactly as
 before.
 
+## Phase 1.5f (legible text in the shrunk HP/AC/Prof boxes) — also verified live
+
+One more follow-up: the previous item's single `scale` factor drove both
+the box chrome (padding/margin/icon size) *and* the font sizes together,
+so at full collapse the text was tiny and basically illegible even though
+the boxes had comfortably enough room for something bigger. Split into two
+independent factors: `scale` keeps shrinking box padding/margin/icon size
+to half as before, while a new `textScale` (barely shrinking at all)
+drives font sizes almost independently — so text stays close to full size
+and legible even in the smallest boxes.
+
+Verified live on William's real sheet: at full collapse, all the HP/AC/
+Prof text is now clearly legible; confirmed via `uiautomator dump` that
+the HP card's bounds are pixel-identical to before this change — the
+boxes genuinely didn't grow, only the text inside them did.
+
 ## Remaining before this is more than a PoC
 
 Nothing acceptance-critical is outstanding. The "Tab Layout Probe" test

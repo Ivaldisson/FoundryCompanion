@@ -239,7 +239,13 @@ class _CollapsingHeaderDelegate extends SliverPersistentHeaderDelegate {
     final range = maxExtent - minExtent;
     // 0 = fully expanded (top of the tab), 1 = fully collapsed.
     final t = range <= 0 ? 0.0 : (shrinkOffset / range).clamp(0.0, 1.0);
+    // The boxes (padding/margin/icon size) shrink all the way to half —
+    // `scale` — but the text inside them barely shrinks at all —
+    // `textScale` — so it stays legible even at minimum box size. Requested
+    // explicitly after the text became basically unreadable once the boxes
+    // themselves were shrinking the font in lockstep.
     final scale = lerpDouble(1.0, 0.5, t)!;
+    final textScale = lerpDouble(1.0, 0.9, t)!;
 
     return ColoredBox(
       color: Theme.of(context).scaffoldBackgroundColor,
@@ -264,6 +270,7 @@ class _CollapsingHeaderDelegate extends SliverPersistentHeaderDelegate {
                     onAdjust: onAdjust,
                     onQuickAdjust: onQuickAdjust,
                     scale: scale,
+                    textScale: textScale,
                   ),
                 ),
                 SizedBox(height: lerpDouble(_spacing, 0, t)),
@@ -383,6 +390,7 @@ class _StatRow extends StatelessWidget {
   final _AdjustFn onAdjust;
   final _AdjustFn onQuickAdjust;
   final double scale;
+  final double textScale;
 
   const _StatRow({
     required this.attributes,
@@ -391,6 +399,7 @@ class _StatRow extends StatelessWidget {
     required this.onAdjust,
     required this.onQuickAdjust,
     this.scale = 1.0,
+    this.textScale = 1.0,
   });
 
   @override
@@ -404,12 +413,18 @@ class _StatRow extends StatelessWidget {
         children: [
           Expanded(
             flex: 2,
-            child: _HpCard(attributes: attributes, onAdjust: onAdjust, onQuickAdjust: onQuickAdjust, scale: scale),
+            child: _HpCard(
+              attributes: attributes,
+              onAdjust: onAdjust,
+              onQuickAdjust: onQuickAdjust,
+              scale: scale,
+              textScale: textScale,
+            ),
           ),
           SizedBox(width: 8 * scale),
-          Expanded(child: _AcCard(attributes: attributes, dexScore: dexScore, scale: scale)),
+          Expanded(child: _AcCard(attributes: attributes, dexScore: dexScore, scale: scale, textScale: textScale)),
           SizedBox(width: 8 * scale),
-          Expanded(child: _StatCard(label: 'Prof', value: '+$prof', scale: scale)),
+          Expanded(child: _StatCard(label: 'Prof', value: '+$prof', scale: scale, textScale: textScale)),
         ],
       ),
     );
@@ -420,8 +435,9 @@ class _StatCard extends StatelessWidget {
   final String label;
   final String value;
   final double scale;
+  final double textScale;
 
-  const _StatCard({required this.label, required this.value, this.scale = 1.0});
+  const _StatCard({required this.label, required this.value, this.scale = 1.0, this.textScale = 1.0});
 
   @override
   Widget build(BuildContext context) {
@@ -435,10 +451,10 @@ class _StatCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(value, style: TextStyle(fontSize: 22 * scale, fontWeight: FontWeight.bold)),
+            Text(value, style: TextStyle(fontSize: 22 * textScale, fontWeight: FontWeight.bold)),
             Text(
               label,
-              style: TextStyle(fontSize: 11 * scale, color: Colors.grey[600]),
+              style: TextStyle(fontSize: 11 * textScale, color: Colors.grey[600]),
               textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -455,12 +471,14 @@ class _HpCard extends StatelessWidget {
   final _AdjustFn onAdjust;
   final _AdjustFn onQuickAdjust;
   final double scale;
+  final double textScale;
 
   const _HpCard({
     required this.attributes,
     required this.onAdjust,
     required this.onQuickAdjust,
     this.scale = 1.0,
+    this.textScale = 1.0,
   });
 
   static const _path = 'system.attributes.hp.value';
@@ -499,7 +517,7 @@ class _HpCard extends StatelessWidget {
           children: [
             Text(
               'Hit Points',
-              style: TextStyle(fontSize: 11 * scale, color: Colors.grey[600]),
+              style: TextStyle(fontSize: 11 * textScale, color: Colors.grey[600]),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -513,14 +531,14 @@ class _HpCard extends StatelessWidget {
                     onTap: () => onAdjust(_path, value),
                     child: FittedBox(
                       child: Text('${value.toInt()} / ${max.toInt()}',
-                          style: TextStyle(fontSize: 20 * scale, fontWeight: FontWeight.bold)),
+                          style: TextStyle(fontSize: 20 * textScale, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ),
                 _iconButton(icon: Icons.add_circle_outline, onPressed: () => onQuickAdjust(_path, 1), scale: scale),
               ],
             ),
-            if (temp > 0 && scale > 0.7) Text('+$temp temp', style: TextStyle(fontSize: 11 * scale)),
+            if (temp > 0 && scale > 0.7) Text('+$temp temp', style: TextStyle(fontSize: 11 * textScale)),
           ],
         ),
       ),
@@ -532,8 +550,9 @@ class _AcCard extends StatelessWidget {
   final Map<String, dynamic> attributes;
   final int dexScore;
   final double scale;
+  final double textScale;
 
-  const _AcCard({required this.attributes, required this.dexScore, this.scale = 1.0});
+  const _AcCard({required this.attributes, required this.dexScore, this.scale = 1.0, this.textScale = 1.0});
 
   @override
   Widget build(BuildContext context) {
@@ -543,6 +562,7 @@ class _AcCard extends StatelessWidget {
       label: computed == null ? 'AC (see raw data)' : 'Armor Class',
       value: _formatAc(ac, dexScore),
       scale: scale,
+      textScale: textScale,
     );
   }
 }
