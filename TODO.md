@@ -157,6 +157,57 @@ actually usable day-to-day at the table, roughly in this order:
     (Weapons/Tools/Containers), Spells (Cantrips, correctly empty of leveled
     spells for an Artificer 1), and Features (Race/Background/Class
     Features/Feats) all categorized correctly on real, messy imported data.
+- [x] ~~Even out the ability score grid (was 4-then-2, left-leaning) and make
+      the header collapse on scroll to give tab content more room~~ — done.
+  - Ability grid: `_AbilitiesGrid` went from a fixed-width `Wrap` (which
+    split 6 cards into an uneven 4-card row then a left-leaning 2-card row)
+    to two even `Row`s of up to three `Expanded` cards each
+    (str/dex/con, int/wis/cha) — full-width, symmetrical.
+  - Collapsing header: `Dnd5eSheetTemplate` now wraps the tab bar in a
+    `NestedScrollView` with a `SliverAppBar` (`pinned: true, floating:
+    true`) holding the big header (name/HP/AC/Prof/ability grid) as its
+    `flexibleSpace.background`. Scrolling down within any tab's list
+    collapses that background away, leaving just a persistent "HP 9/9 · AC
+    13 · Prof +2" strip pinned above the tab bar; scrolling up re-expands
+    it. `floating: true` means this reveal doesn't require scrolling all
+    the way back to the top of a long list — a small upward scroll from
+    anywhere starts bringing the header back, matching common
+    collapsing-toolbar apps. Each tab (`_TabBody`) is its own
+    `CustomScrollView` with a `SliverOverlapInjector` matching the header's
+    `SliverOverlapAbsorber` — the standard Flutter pattern for a
+    `SliverAppBar` + `TabBar` combo, needed so per-tab scroll positions
+    don't fight over one shared controller.
+  - **First attempt used `FlexibleSpaceBar.title` to crossfade in the
+    compact summary as the header collapsed — didn't hold up**: verified
+    live that once fully collapsed, the compact title never appeared at
+    all (confirmed via `uiautomator`: no such text node in the tree, and
+    the reserved toolbar band measured near-zero height instead of the
+    expected `toolbarHeight`). Rather than fight `SliverAppBar`/
+    `NestedScrollView` internals further, made the compact summary a
+    plain, always-visible row inside the app bar's `bottom` (alongside the
+    `TabBar`, which is reliably pinned by design) instead of a
+    fade-triggered `title`. Trade-off: the compact stats are visible even
+    while the big header is also expanded (mildly redundant at the very
+    top), in exchange for behavior that's actually correct rather than a
+    reservation that silently failed to show anything once collapsed.
+  - `_headerExpandedHeight` (how tall the `SliverAppBar` is at full
+    expansion) was originally estimated from guessed font/padding metrics
+    (320) — verified live that this was much too small (the second row of
+    the ability grid was clipped off entirely, confirmed via
+    `uiautomator`). Corrected by measuring actual on-device bounds via
+    `uiautomator dump` (accounting for this device's 4.0 `devicePixelRatio`
+    — `wm density`/`wm size` gave 640/1440) rather than guessing again.
+  - Verified live on William's real sheet: 2×3 ability grid renders
+    correctly; scrolling down in Skills & Saves collapses the header to
+    just the compact stat line while the tab bar and content stay fully
+    usable; a small scroll-up from deep in a long list (not just from the
+    very top) immediately starts re-revealing the header; scrolling back
+    to the top restores it in full. Also re-verified the existing
+    tab-selection-survives-an-edit fix still holds under this
+    `NestedScrollView` structure: toggled the "equipped" icon on William's
+    real "Hammer" (Inventory tab) — confirmed via `uiautomator` that the
+    Inventory tab stayed selected — then toggled it back to leave his
+    actor unchanged.
 
 ### Phase 2 — Player-facing parity with D&D Beyond
 - [ ] Rest handling: short/long rest actions that trigger the right resource resets.

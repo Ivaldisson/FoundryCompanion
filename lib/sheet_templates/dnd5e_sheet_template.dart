@@ -38,6 +38,25 @@ typedef _RollFn = void Function({required String title, required String defaultF
 typedef _AdjustFn = void Function(String path, num value, {String? targetUuid});
 typedef _EditLeafFn = void Function(String path, dynamic currentValue, {String? targetUuid});
 
+/// Height of the always-visible compact HP/AC/Prof summary row pinned
+/// above the [TabBar], as part of the [SliverAppBar]'s `bottom`.
+const _compactSummaryHeight = 32.0;
+
+/// Expanded height of the collapsing header (name/HP/AC/Prof/ability
+/// scores) in [NestedScrollView.headerSliverBuilder]'s [SliverAppBar],
+/// measured on-device (not computed from font metrics, which undershot
+/// badly — `Card`'s default margin and real line heights run bigger than
+/// estimated). The background is always laid out at this height regardless
+/// of scroll position — it's clipped as the sliver collapses, not resized.
+const _headerExpandedHeight = 410.0 + _compactSummaryHeight;
+
+String _formatAc(Map<String, dynamic> ac, int dexScore) {
+  final calc = ac['calc'] as String?;
+  final flat = (ac['flat'] as num?)?.toInt();
+  final computed = defaultArmorClass(calc: calc, dexScore: dexScore);
+  return computed?.toString() ?? flat?.toString() ?? '—';
+}
+
 /// Reference implementation of [SheetTemplate] — see that file's doc
 /// comment and `TODO.md` for how to add one for another system.
 ///
@@ -92,79 +111,127 @@ class Dnd5eSheetTemplate implements SheetTemplate {
 
     return DefaultTabController(
       length: 5,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: Column(
-              children: [
-                _Header(
-                  name: ctx.actor['name'] as String? ?? '',
-                  level: level,
-                  classLine: _classLine(items),
-                  onEditName: () => ctx.onEditLeaf('name', ctx.actor['name']),
+      child: NestedScrollView(
+        headerSliverBuilder: (context, innerBoxIsScrolled) => [
+          SliverOverlapAbsorber(
+            handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+            sliver: SliverAppBar(
+              automaticallyImplyLeading: false,
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+              elevation: 0,
+              forceElevated: innerBoxIsScrolled,
+              pinned: true,
+              floating: true,
+              expandedHeight: _headerExpandedHeight,
+              flexibleSpace: FlexibleSpaceBar(
+                background: SingleChildScrollView(
+                  // Never actually scrolls (the outer NestedScrollView owns
+                  // scrolling) — just lets the background lay out at its
+                  // natural height without a RenderFlex overflow error if
+                  // _headerExpandedHeight is ever a bit too tight.
+                  physics: const NeverScrollableScrollPhysics(),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                    child: Column(
+                      children: [
+                        _Header(
+                          name: ctx.actor['name'] as String? ?? '',
+                          level: level,
+                          classLine: _classLine(items),
+                          onEditName: () => ctx.onEditLeaf('name', ctx.actor['name']),
+                        ),
+                        const SizedBox(height: 12),
+                        // IntrinsicHeight gives the Row a bounded height to
+                        // stretch into — plain CrossAxisAlignment.stretch on
+                        // a Row throws at layout time when the Row's own
+                        // height is unbounded. Confirmed by bisection
+                        // on-device (pre-dates this NestedScrollView
+                        // rewrite, kept as cheap insurance).
+                        IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: _HpCard(
+                                    attributes: attributes, onAdjust: ctx.onAdjust, onQuickAdjust: ctx.onQuickAdjust),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(child: _AcCard(attributes: attributes, dexScore: dexScore)),
+                              const SizedBox(width: 8),
+                              Expanded(child: _StatCard(label: 'Prof', value: '+$prof')),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _AbilitiesGrid(abilities: abilities, onRoll: ctx.onRoll, onAdjust: ctx.onAdjust),
+                      ],
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 12),
-                // IntrinsicHeight gives the Row a bounded height to stretch
-                // into — plain CrossAxisAlignment.stretch on a Row throws at
-                // layout time when the Row's own height is unbounded, which
-                // silently blanks the screen with no visible error on some
-                // renderers/devices. Confirmed by bisection on-device.
-                IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+              ),
+              // A persistent, always-pinned strip below the collapsible
+              // header: a compact HP/AC/Prof summary, then the TabBar.
+              // (An earlier version tried to make this summary a
+              // FlexibleSpaceBar `title` that crossfades in only once
+              // collapsed — that reservation didn't hold up under
+              // NestedScrollView in practice, so it's a plain always-visible
+              // row here instead: simpler, and it doubles as a quick-glance
+              // reference even while the full header is still expanded.)
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(_compactSummaryHeight + kTextTabBarHeight),
+                child: ColoredBox(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  child: Column(
                     children: [
-                      Expanded(
-                        flex: 2,
-                        child:
-                            _HpCard(attributes: attributes, onAdjust: ctx.onAdjust, onQuickAdjust: ctx.onQuickAdjust),
+                      SizedBox(
+                        height: _compactSummaryHeight,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Align(
+                            alignment: AlignmentDirectional.centerStart,
+                            child: _CompactHeaderSummary(attributes: attributes, dexScore: dexScore, prof: prof),
+                          ),
+                        ),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(child: _AcCard(attributes: attributes, dexScore: dexScore)),
-                      const SizedBox(width: 8),
-                      Expanded(child: _StatCard(label: 'Prof', value: '+$prof')),
+                      const TabBar(
+                        isScrollable: true,
+                        tabAlignment: TabAlignment.start,
+                        tabs: [
+                          Tab(text: 'Skills & Saves'),
+                          Tab(text: 'Inventory'),
+                          Tab(text: 'Spells'),
+                          Tab(text: 'Features'),
+                          Tab(text: 'Raw Data'),
+                        ],
+                      ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 12),
-                _AbilitiesGrid(abilities: abilities, onRoll: ctx.onRoll, onAdjust: ctx.onAdjust),
-              ],
-            ),
-          ),
-          const TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: [
-              Tab(text: 'Skills & Saves'),
-              Tab(text: 'Inventory'),
-              Tab(text: 'Spells'),
-              Tab(text: 'Features'),
-              Tab(text: 'Raw Data'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              children: [
-                _SkillsSavesTab(abilities: abilities, skills: skills, prof: prof, onRoll: ctx.onRoll),
-                _InventoryTab(
-                  actorUuid: ctx.uuid,
-                  currency: currency,
-                  categorized: categorized,
-                  onAdjust: ctx.onAdjust,
-                  onEditLeaf: ctx.onEditLeaf,
-                ),
-                _SpellsTab(
-                  actorUuid: ctx.uuid,
-                  categorized: categorized,
-                  system: system,
-                  onEditLeaf: ctx.onEditLeaf,
-                ),
-                _FeaturesTab(categorized: categorized),
-                ListView(padding: const EdgeInsets.all(12), children: [ctx.rawDataView]),
-              ],
+              ),
             ),
           ),
         ],
+        body: TabBarView(
+          children: [
+            _SkillsSavesTab(abilities: abilities, skills: skills, prof: prof, onRoll: ctx.onRoll),
+            _InventoryTab(
+              actorUuid: ctx.uuid,
+              currency: currency,
+              categorized: categorized,
+              onAdjust: ctx.onAdjust,
+              onEditLeaf: ctx.onEditLeaf,
+            ),
+            _SpellsTab(
+              actorUuid: ctx.uuid,
+              categorized: categorized,
+              system: system,
+              onEditLeaf: ctx.onEditLeaf,
+            ),
+            _FeaturesTab(categorized: categorized),
+            _TabBody(tabId: 'raw', children: [ctx.rawDataView]),
+          ],
+        ),
       ),
     );
   }
@@ -334,17 +401,43 @@ class _AcCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ac = ((attributes['ac'] as Map?)?.cast<String, dynamic>()) ?? {};
-    final calc = ac['calc'] as String?;
-    final flat = (ac['flat'] as num?)?.toInt();
-    final computed = defaultArmorClass(calc: calc, dexScore: dexScore);
-    final display = computed?.toString() ?? flat?.toString() ?? '—';
+    final computed = defaultArmorClass(calc: ac['calc'] as String?, dexScore: dexScore);
     return _StatCard(
       label: computed == null ? 'AC (see raw data)' : 'Armor Class',
-      value: display,
+      value: _formatAc(ac, dexScore),
     );
   }
 }
 
+/// Compact one-line stand-in for the full header, shown as the
+/// [SliverAppBar]'s `title` — crossfades in automatically as the header
+/// collapses (Flutter's [FlexibleSpaceBar] handles the fade), so there's
+/// always *something* useful visible (current HP/AC/Prof) once the full
+/// header, ability grid included, has scrolled out of the way.
+class _CompactHeaderSummary extends StatelessWidget {
+  final Map<String, dynamic> attributes;
+  final int dexScore;
+  final int prof;
+
+  const _CompactHeaderSummary({required this.attributes, required this.dexScore, required this.prof});
+
+  @override
+  Widget build(BuildContext context) {
+    final hp = ((attributes['hp'] as Map?)?.cast<String, dynamic>()) ?? {};
+    final hpValue = ((hp['value'] as num?) ?? 0).toInt();
+    final hpMax = ((hp['max'] as num?) ?? 0).toInt();
+    final ac = ((attributes['ac'] as Map?)?.cast<String, dynamic>()) ?? {};
+    return Text(
+      'HP $hpValue/$hpMax  ·  AC ${_formatAc(ac, dexScore)}  ·  Prof +$prof',
+      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+/// Two even rows of up to three cards each (str/dex/con, int/wis/cha for a
+/// full ability set), rather than a left-leaning [Wrap] that split 6 fixed-
+/// width cards into an uneven 4-then-2 layout.
 class _AbilitiesGrid extends StatelessWidget {
   final Map<String, dynamic> abilities;
   final _RollFn onRoll;
@@ -354,45 +447,109 @@ class _AbilitiesGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+    final presentKeys = _abilityLabels.keys.where((k) => abilities[k] is Map).toList();
+    final rows = <List<String>>[
+      for (var i = 0; i < presentKeys.length; i += 3)
+        presentKeys.sublist(i, i + 3 > presentKeys.length ? presentKeys.length : i + 3),
+    ];
+
+    return Column(
       children: [
-        for (final key in _abilityLabels.keys)
-          if (abilities[key] is Map)
-            Builder(builder: (context) {
-              final ability = (abilities[key] as Map).cast<String, dynamic>();
-              final score = (ability['value'] as num?)?.toInt() ?? 10;
-              final mod = abilityModifier(score);
-              return InkWell(
-                onTap: () => onRoll(
-                  title: '${_abilityLabels[key]} check',
-                  defaultFormula: '1d20 + $mod',
-                  defaultFlavor: '${_abilityLabels[key]} check',
-                ),
-                onLongPress: () => onAdjust('system.abilities.$key.value', score),
-                child: Container(
-                  width: 76,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    color: scheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(_abilityLabels[key]!,
-                          style: TextStyle(fontSize: 11, color: scheme.onPrimaryContainer)),
-                      Text(mod >= 0 ? '+$mod' : '$mod',
-                          style: TextStyle(
-                              fontSize: 22, fontWeight: FontWeight.bold, color: scheme.onPrimaryContainer)),
-                      Text('$score', style: TextStyle(fontSize: 11, color: scheme.onPrimaryContainer)),
-                    ],
+        for (var r = 0; r < rows.length; r++) ...[
+          if (r > 0) const SizedBox(height: 8),
+          Row(
+            children: [
+              for (var i = 0; i < rows[r].length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                Expanded(
+                  child: _AbilityCard(
+                    abilityKey: rows[r][i],
+                    abilities: abilities,
+                    onRoll: onRoll,
+                    onAdjust: onAdjust,
                   ),
                 ),
-              );
-            }),
+              ],
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _AbilityCard extends StatelessWidget {
+  final String abilityKey;
+  final Map<String, dynamic> abilities;
+  final _RollFn onRoll;
+  final _AdjustFn onAdjust;
+
+  const _AbilityCard({
+    required this.abilityKey,
+    required this.abilities,
+    required this.onRoll,
+    required this.onAdjust,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final ability = (abilities[abilityKey] as Map).cast<String, dynamic>();
+    final score = (ability['value'] as num?)?.toInt() ?? 10;
+    final mod = abilityModifier(score);
+    final label = _abilityLabels[abilityKey]!;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () => onRoll(
+        title: '$label check',
+        defaultFormula: '1d20 + $mod',
+        defaultFlavor: '$label check',
+      ),
+      onLongPress: () => onAdjust('system.abilities.$abilityKey.value', score),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: scheme.primaryContainer,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: TextStyle(fontSize: 11, color: scheme.onPrimaryContainer)),
+            Text(mod >= 0 ? '+$mod' : '$mod',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: scheme.onPrimaryContainer)),
+            Text('$score', style: TextStyle(fontSize: 11, color: scheme.onPrimaryContainer)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Sliver-based stand-in for a plain `ListView` as a [TabBarView] child
+/// inside [NestedScrollView] — each tab needs its own [CustomScrollView]
+/// (with a distinct [PageStorageKey] so tabs don't fight over scroll
+/// position) plus a [SliverOverlapInjector] matching the header's
+/// [SliverOverlapAbsorber], or the collapsing header above doesn't lay out
+/// correctly against per-tab scrolling. See the Flutter cookbook's
+/// "NestedScrollView with TabBar" sample, which this mirrors.
+class _TabBody extends StatelessWidget {
+  final String tabId;
+  final List<Widget> children;
+
+  const _TabBody({required this.tabId, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomScrollView(
+      key: PageStorageKey<String>(tabId),
+      slivers: [
+        SliverOverlapInjector(handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context)),
+        SliverPadding(
+          padding: const EdgeInsets.all(12),
+          sliver: SliverList(delegate: SliverChildListDelegate(children)),
+        ),
       ],
     );
   }
@@ -408,8 +565,8 @@ class _SkillsSavesTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(12),
+    return _TabBody(
+      tabId: 'skills',
       children: [
         _SectionLabel('Saving Throws'),
         _SavesList(abilities: abilities, prof: prof, onRoll: onRoll),
@@ -573,8 +730,8 @@ class _InventoryTab extends StatelessWidget {
       if (categorized.inventoryByType.containsKey('other')) 'other',
     ];
 
-    return ListView(
-      padding: const EdgeInsets.all(12),
+    return _TabBody(
+      tabId: 'inventory',
       children: [
         _SectionLabel('Currency'),
         _CurrencyRow(currency: currency, onAdjust: onAdjust),
@@ -660,21 +817,21 @@ class _SpellsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (categorized.spellCount == 0) {
-      return const Center(child: Text('No spells.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)));
-    }
     final levels = categorized.spellsByLevel.keys.toList()..sort();
     final spellsSystem = ((system['spells'] as Map?)?.cast<String, dynamic>()) ?? {};
 
-    return ListView(
-      padding: const EdgeInsets.all(12),
+    return _TabBody(
+      tabId: 'spells',
       children: [
-        for (final level in levels) ...[
-          _SectionLabel(_levelHeading(level, spellsSystem)),
-          for (final item in categorized.spellsByLevel[level]!)
-            _SpellRow(actorUuid: actorUuid, item: item, onEditLeaf: onEditLeaf),
-          const SizedBox(height: 12),
-        ],
+        if (categorized.spellCount == 0)
+          const Text('No spells.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))
+        else
+          for (final level in levels) ...[
+            _SectionLabel(_levelHeading(level, spellsSystem)),
+            for (final item in categorized.spellsByLevel[level]!)
+              _SpellRow(actorUuid: actorUuid, item: item, onEditLeaf: onEditLeaf),
+            const SizedBox(height: 12),
+          ],
       ],
     );
   }
@@ -736,27 +893,26 @@ class _FeaturesTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (categorized.featureCount == 0) {
-      return const Center(
-          child: Text('No features.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)));
-    }
     final orderedKeys = [
       ...featureTypeOrder.where((k) => categorized.featuresByType.containsKey(k)),
       if (categorized.featuresByType.containsKey('other')) 'other',
     ];
 
-    return ListView(
-      padding: const EdgeInsets.all(12),
+    return _TabBody(
+      tabId: 'features',
       children: [
-        for (final key in orderedKeys) ...[
-          _SectionLabel(featureTypeLabels[key] ?? 'Other'),
-          for (final item in categorized.featuresByType[key]!)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Text(item['name'] as String? ?? '(unnamed)', style: const TextStyle(fontSize: 13)),
-            ),
-          const SizedBox(height: 12),
-        ],
+        if (categorized.featureCount == 0)
+          const Text('No features.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))
+        else
+          for (final key in orderedKeys) ...[
+            _SectionLabel(featureTypeLabels[key] ?? 'Other'),
+            for (final item in categorized.featuresByType[key]!)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text(item['name'] as String? ?? '(unnamed)', style: const TextStyle(fontSize: 13)),
+              ),
+            const SizedBox(height: 12),
+          ],
       ],
     );
   }

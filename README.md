@@ -36,11 +36,13 @@ Talks to a self-hosted
 - **Optional per-system sheet template** (`lib/sheet_templates/`) — when the
   connected world's system is recognized, the actor screen renders a
   purpose-built, traditional-looking sheet instead of the generic tree: a
-  fixed header/HP/AC/ability-score summary, then a tab bar (Skills & Saves,
-  Inventory, Spells, Features, Raw Data). The generic tree is still there
-  underneath, unfiltered, as the "Raw Data" tab — the fallback for any
-  system without a template, and the guarantee that a template never hides
-  data it doesn't specifically surface. `Dnd5eSheetTemplate` is the
+  header/HP/AC/ability-score summary that collapses to a compact stat line
+  as you scroll a tab's content (more room for what you're actually
+  looking at) and expands back on scroll-up, then a tab bar (Skills &
+  Saves, Inventory, Spells, Features, Raw Data). The generic tree is still
+  there underneath, unfiltered, as the "Raw Data" tab — the fallback for
+  any system without a template, and the guarantee that a template never
+  hides data it doesn't specifically surface. `Dnd5eSheetTemplate` is the
   reference implementation — see "Why an optional sheet template" below.
 
 ## Why SSE instead of `web_socket_channel`
@@ -384,6 +386,55 @@ attribute, not just eyeballing a screenshot):
   correctly showed only Cantrips (accurate for a level-1 Artificer with no
   leveled spells yet); Features correctly grouped Race (Tiefling), one
   Background, and several Class Features/Feats. No edits made to his actor.
+
+## Phase 1.5c (even ability grid, collapsing header) — also verified live
+
+Two follow-up requests once the tabbed layout above was in place: the
+ability score grid split 6 cards into an uneven 4-then-2 layout (a plain
+`Wrap` at a fixed card width, so it just wrapped whenever it ran out of
+room), and the header/HP/AC/ability summary should shrink out of the way
+while scrolling a tab's content, restoring on scroll-up.
+
+The grid fix was straightforward: `_AbilitiesGrid` now builds two even
+`Row`s of up to three `Expanded` cards each, rather than letting a `Wrap`
+decide the split.
+
+The collapsing header took two attempts. `Dnd5eSheetTemplate` wraps the tab
+bar in a `NestedScrollView` with a `SliverAppBar` (`pinned: true, floating:
+true`) holding the full header as `flexibleSpace.background`; each tab is
+its own `CustomScrollView` with a `SliverOverlapInjector` matching the
+header's `SliverOverlapAbsorber` (the standard Flutter pattern for a
+`SliverAppBar` + `TabBar` combo — needed so the five tabs don't fight over
+one shared scroll controller). The first attempt tried to show a compact
+"HP/AC/Prof" summary via `FlexibleSpaceBar.title`, which is *supposed* to
+crossfade in as the header collapses — verified live that it didn't: once
+fully collapsed, no such text appeared anywhere, and `uiautomator`
+confirmed the toolbar band reserved for it measured close to zero height
+rather than the expected `toolbarHeight`. Rather than keep fighting
+`SliverAppBar` internals under `NestedScrollView`, the compact summary
+became a plain, always-visible row inside the app bar's `bottom` (next to
+the `TabBar`, which *is* reliably pinned) — a small trade-off (the compact
+stats show even while the big header is also expanded) for behavior that
+actually works instead of a reservation that silently failed to render
+anything.
+
+The other correction was `_headerExpandedHeight` itself: an initial guess
+based on estimated font/padding metrics (320) turned out far too small —
+verified live that the second row of the ability grid was being clipped
+off entirely. Fixed by measuring real on-device bounds via `uiautomator
+dump` (cross-checked against this device's actual `devicePixelRatio`, 4.0,
+from `wm density`/`wm size`) instead of guessing again.
+
+Verified live end-to-end on William's real sheet: the 2×3 ability grid
+renders correctly; scrolling down in Skills & Saves collapses the header to
+a compact "HP 9/9 · AC 13 · Prof +2" line while the tab content gets the
+freed-up space; a *small* scroll-up from deep in a long list (not just
+from the very top) immediately starts re-revealing the header, thanks to
+`floating: true`; scrolling back to the top restores it in full. Also
+re-confirmed the earlier tab-selection-survives-an-edit fix still holds
+under this restructuring — toggled "equipped" on William's real "Hammer",
+confirmed via `uiautomator` that the Inventory tab stayed selected, then
+toggled it back to leave his actor as found.
 
 ## Remaining before this is more than a PoC
 
