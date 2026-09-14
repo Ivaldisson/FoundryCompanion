@@ -109,7 +109,11 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
     if (formula == null || formula.trim().isEmpty || !mounted) return;
 
     try {
-      final roll = await _client.postRoll(formula: formula.trim(), flavor: flavorController.text.trim());
+      final roll = await _client.postRoll(
+        formula: formula.trim(),
+        flavor: flavorController.text.trim(),
+        speaker: widget.uuid,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

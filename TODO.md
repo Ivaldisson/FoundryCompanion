@@ -92,6 +92,21 @@ actually usable day-to-day at the table, roughly in this order:
     (mod +3/+2, proficiency +3, Athletics +5, AC 12); tapped an ability card
     → rolled `1d20 + 3`, confirmed in Foundry's chat; tapped HP -1 →
     confirmed `29` via `GET /get`. Deleted the probe actor afterward.
+  - **Not a bug, but worth recording**: that first probe actor only showed
+    STR/DEX (abilities) and Athletics (skills) — looked like the template
+    was dropping fields. Root-caused: the probe was created via `POST
+    /create` with a *partial* `system.abilities`/`system.skills` payload
+    (only the fields I bothered to set), and the relay appears to replace
+    those nested objects wholesale rather than deep-merging into the
+    system's schema defaults — so con/int/wis/cha and the other 17 skills
+    were genuinely absent from the stored document, not just hidden by the
+    template. Confirmed by creating a second, completely bare actor
+    (`{name, type: "character"}`, no `system` data at all) — that one came
+    back from `GET /get` with all 6 abilities and all 18 skills present,
+    which the template then rendered correctly. So: real actors (created
+    normally in Foundry, or via `/create` with no/full `system` data) will
+    always show everything; only a deliberately-partial API-created probe
+    won't. No template fix needed.
   - **Next system**: implement `SheetTemplate` for another system (Pathfinder
     2e is the next most-likely candidate given Foundry's ecosystem) and
     register it in `SheetTemplateRegistry` — the mechanism is generic, only
@@ -151,6 +166,25 @@ actually usable day-to-day at the table, roughly in this order:
 
 ## Bugs
 
+- [x] ~~Rolls posted from the app weren't attributed to the character in
+      Foundry's chat log — showed up as the generic API/GM user instead of
+      the actor's name~~ — fixed. Flagged by the user as important, and
+      rightly so: for a companion app this is core, not cosmetic.
+  - `RelayClient.postRoll()` never sent the optional `speaker` param `POST
+    /roll` accepts, so the relay/Foundry had no actor to attribute the roll
+    to. Confirmed live: without `speaker`, the resulting chat message had
+    `speaker: {actor: null, alias: undefined}`; with `speaker: "<actor
+    UUID>"`, the relay resolves it into a proper `{actor: "<id>", alias:
+    "<actor name>"}` on the chat message — exactly what makes Foundry's own
+    chat log show the character's name instead of "Gamemaster".
+  - Fix: `postRoll()` gained an optional `speaker` param; `ActorSheetScreen`
+    passes `widget.uuid` on every call. Since both the generic tree's
+    numeric-leaf rolls and the dnd5e template's ability/save/skill rolls go
+    through the same `_openRollDialogFor()`, one fix point covers all roll
+    paths. Verified live from the actual UI (not just curl): tapped an
+    ability card → rolled → chat message showed `speaker.alias: "Bare Actor
+    Probe"`, and the app's own chat screen displayed the actor's name as
+    the message header instead of the GM.
 - [x] ~~`setState()` callback argument returned a Future — crashed the app the instant the actor list opened~~ — fixed.
   - `lib/screens/actor_picker_screen.dart` and `lib/screens/actor_sheet_screen.dart` both had `setState(() => _future = _client.foo())`. That's an arrow callback, so it evaluates to the assignment's value — the `Future` `_client.foo()` returns. Flutter's `setState` asserts its callback returns `void` and throws.
   - Fix: block body (`setState(() { _future = ...; })`) in both places instead of the arrow form.

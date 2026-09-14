@@ -20,8 +20,9 @@ Talks to a self-hosted
   been tested against a real 5e actor payload (see below).
 - **Roll trigger** — every numeric leaf in the sheet is tappable; tapping
   opens a dialog pre-filled with a formula and the JSON path as flavor text,
-  then `POST /roll` with `createChatMessage: true` so the result lands in
-  Foundry's own chat log.
+  then `POST /roll` with `createChatMessage: true` and `speaker: <actor
+  UUID>` so the result lands in Foundry's own chat log attributed to the
+  character (name + portrait), not a generic API user.
 - **Writable sheet** — long-press any numeric leaf for a +/- adjust dialog
   (`POST /increase`/`/decrease`); tap any string/bool leaf to edit it in
   place (`PUT /update`). A **Condities** row above the tree shows active
@@ -284,6 +285,29 @@ With that fixed, verified live end-to-end:
   `GET /get` confirmed `hp.value` went `30` → `29`.
 - Expanded "Ruwe data" at the bottom — the full generic tree, same as
   Phase 1, still there and interactive underneath the template.
+
+One thing that looked like a template bug wasn't: the probe actor only
+showed STR/DEX and one skill at first. Root-caused to the probe itself — it
+was created with a *partial* `system.abilities`/`system.skills` payload,
+which the relay appears to replace wholesale rather than merge into the
+schema defaults, so the other fields were genuinely missing from the
+document. A second, completely bare actor (`{name, type: "character"}`, no
+`system` data) came back from `GET /get` with all 6 abilities and all 18
+skills, which the template rendered correctly. Real actors — created
+normally in Foundry, or via the relay with no/full `system` data — always
+have the full set; this was purely an artifact of how the test data was built.
+
+**Also fixed while testing this**: rolls weren't attributed to the
+character in Foundry's chat log — they showed up as the generic API/GM
+user. `RelayClient.postRoll()` wasn't sending the `speaker` param `POST
+/roll` accepts. Confirmed live: passing `speaker: "<actor UUID>"` makes the
+relay resolve it into a proper `{actor, alias}` on the resulting chat
+message. Fixed at the single dialog call site (`ActorSheetScreen`), so it
+covers every roll path — generic-tree numeric leaves and the dnd5e
+template's ability/save/skill rolls alike. Re-verified from the actual UI:
+tapping an ability card now produces a chat message headed with the
+character's name, both on the relay (`speaker.alias`) and in the app's own
+chat screen.
 
 ## Remaining before this is more than a PoC
 

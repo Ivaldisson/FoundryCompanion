@@ -119,7 +119,12 @@ class RelayClient {
     }
   }
 
-  Future<RollInfo> postRoll({required String formula, String? flavor}) async {
+  /// [speaker], when given the rolling actor's UUID, makes the roll show up
+  /// in Foundry's chat log attributed to that actor (alias + portrait)
+  /// instead of the API user generically — confirmed live: the relay
+  /// resolves a bare actor UUID string into the proper
+  /// `{actor, alias, ...}` speaker object on the resulting chat message.
+  Future<RollInfo> postRoll({required String formula, String? flavor, String? speaker}) async {
     try {
       final res = await _dio.post(
         '/roll',
@@ -127,6 +132,7 @@ class RelayClient {
         data: {
           'formula': formula,
           if (flavor != null && flavor.isNotEmpty) 'flavor': flavor,
+          if (speaker != null && speaker.isNotEmpty) 'speaker': speaker,
           'createChatMessage': true,
         },
       );
