@@ -38,25 +38,24 @@ typedef _RollFn = void Function({required String title, required String defaultF
 typedef _AdjustFn = void Function(String path, num value, {String? targetUuid});
 typedef _EditLeafFn = void Function(String path, dynamic currentValue, {String? targetUuid});
 
-/// Height of the always-visible compact HP/AC/Prof stat row pinned above
-/// the [TabBar], as part of the [SliverAppBar]'s `bottom` — the same
-/// [_HpCard]/[_AcCard]/[_StatCard] boxes as the full header, just shrunk
-/// (`compact: true`), not replaced by a plain text summary.
-const _compactStatRowHeight = 52.0;
+/// Height of the always-visible HP/AC/Prof stat row pinned above the
+/// [TabBar], as part of the [SliverAppBar]'s `bottom` — full size, same as
+/// it always was; only the name/class line and ability grid collapse away.
+/// Measured on-device rather than computed from font metrics (which
+/// undershot badly the first time this header was built — `Card`'s
+/// default margin and real line heights run bigger than estimated).
+const _statRowHeight = 104.0;
 
 /// Height of the part of the header that collapses away entirely on
-/// scroll: just the name/class line and the ability score grid now — HP/AC/
-/// Prof moved to the always-visible [_compactStatRowHeight] row below, so
-/// they're not duplicated between the expanded and collapsed states.
-/// Measured on-device rather than computed from font metrics (which
-/// undershot badly the first time — `Card`'s default margin and real line
-/// heights run bigger than estimated).
+/// scroll: just the name/class line and the ability score grid — HP/AC/
+/// Prof live in the always-visible [_statRowHeight] row below and never
+/// collapse. Also measured on-device.
 const _collapsibleHeaderHeight = 222.0;
 
 /// Total expanded height of the [SliverAppBar]: the collapsible part plus
-/// the always-visible compact stat row and [TabBar] (the `bottom`), which
-/// stay reserved even at full collapse.
-const _headerExpandedHeight = _collapsibleHeaderHeight + _compactStatRowHeight + kTextTabBarHeight;
+/// the always-visible stat row and [TabBar] (the `bottom`), which stay
+/// reserved even at full collapse.
+const _headerExpandedHeight = _collapsibleHeaderHeight + _statRowHeight + kTextTabBarHeight;
 
 String _formatAc(Map<String, dynamic> ac, int dexScore) {
   final calc = ac['calc'] as String?;
@@ -159,20 +158,21 @@ class Dnd5eSheetTemplate implements SheetTemplate {
                 ),
               ),
               // A persistent, always-pinned strip below the collapsible
-              // header: the same HP/AC/Prof boxes as the full header, just
-              // shrunk (`compact: true`), then the TabBar. (An earlier
-              // version replaced these with a plain text summary via
-              // FlexibleSpaceBar's `title` — that crossfade reservation
-              // didn't hold up under NestedScrollView in practice, so this
-              // is a plain always-visible row instead of a fade-in.)
+              // header: the HP/AC/Prof boxes at full size (never shrunk —
+              // only the name/class line and ability grid above collapse
+              // away), then the TabBar. (An earlier version shrank these
+              // boxes down here, and an even earlier one replaced them with
+              // a plain text summary via FlexibleSpaceBar's `title` — that
+              // crossfade reservation didn't hold up under NestedScrollView
+              // in practice, so this is a plain always-visible row.)
               bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(_compactStatRowHeight + kTextTabBarHeight),
+                preferredSize: const Size.fromHeight(_statRowHeight + kTextTabBarHeight),
                 child: ColoredBox(
                   color: Theme.of(context).scaffoldBackgroundColor,
                   child: Column(
                     children: [
                       SizedBox(
-                        height: _compactStatRowHeight,
+                        height: _statRowHeight,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                           child: _StatRow(
@@ -181,7 +181,6 @@ class Dnd5eSheetTemplate implements SheetTemplate {
                             prof: prof,
                             onAdjust: ctx.onAdjust,
                             onQuickAdjust: ctx.onQuickAdjust,
-                            compact: true,
                           ),
                         ),
                       ),
@@ -298,17 +297,15 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// The HP/AC/Prof row — shared between the full header (`compact: false`)
-/// and the always-visible pinned strip above the [TabBar]
-/// (`compact: true`), so shrinking it is one flag rather than a second
-/// hand-maintained copy of the same three cards.
+/// The HP/AC/Prof row — a small widget purely so it's built once (used
+/// only in the always-visible strip above the [TabBar] now — the name/class
+/// line and ability grid are the only things that collapse on scroll).
 class _StatRow extends StatelessWidget {
   final Map<String, dynamic> attributes;
   final int dexScore;
   final int prof;
   final _AdjustFn onAdjust;
   final _AdjustFn onQuickAdjust;
-  final bool compact;
 
   const _StatRow({
     required this.attributes,
@@ -316,7 +313,6 @@ class _StatRow extends StatelessWidget {
     required this.prof,
     required this.onAdjust,
     required this.onQuickAdjust,
-    this.compact = false,
   });
 
   @override
@@ -330,17 +326,12 @@ class _StatRow extends StatelessWidget {
         children: [
           Expanded(
             flex: 2,
-            child: _HpCard(
-              attributes: attributes,
-              onAdjust: onAdjust,
-              onQuickAdjust: onQuickAdjust,
-              compact: compact,
-            ),
+            child: _HpCard(attributes: attributes, onAdjust: onAdjust, onQuickAdjust: onQuickAdjust),
           ),
-          SizedBox(width: compact ? 6 : 8),
-          Expanded(child: _AcCard(attributes: attributes, dexScore: dexScore, compact: compact)),
-          SizedBox(width: compact ? 6 : 8),
-          Expanded(child: _StatCard(label: 'Prof', value: '+$prof', compact: compact)),
+          const SizedBox(width: 8),
+          Expanded(child: _AcCard(attributes: attributes, dexScore: dexScore)),
+          const SizedBox(width: 8),
+          Expanded(child: _StatCard(label: 'Prof', value: '+$prof')),
         ],
       ),
     );
@@ -350,30 +341,21 @@ class _StatRow extends StatelessWidget {
 class _StatCard extends StatelessWidget {
   final String label;
   final String value;
-  final bool compact;
 
-  const _StatCard({required this.label, required this.value, this.compact = false});
+  const _StatCard({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Card(
-      margin: EdgeInsets.symmetric(vertical: compact ? 0 : 4),
       color: scheme.surfaceContainerHigh,
       child: Padding(
-        padding: EdgeInsets.symmetric(vertical: compact ? 2 : 12, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(value, style: TextStyle(fontSize: compact ? 15 : 22, fontWeight: FontWeight.bold)),
-            Text(
-              label,
-              style: TextStyle(fontSize: compact ? 8 : 11, color: Colors.grey[600]),
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+            Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[600]), textAlign: TextAlign.center),
           ],
         ),
       ),
@@ -385,32 +367,12 @@ class _HpCard extends StatelessWidget {
   final Map<String, dynamic> attributes;
   final _AdjustFn onAdjust;
   final _AdjustFn onQuickAdjust;
-  final bool compact;
 
-  const _HpCard({
-    required this.attributes,
-    required this.onAdjust,
-    required this.onQuickAdjust,
-    this.compact = false,
-  });
+  const _HpCard({required this.attributes, required this.onAdjust, required this.onQuickAdjust});
 
   static const _path = 'system.attributes.hp.value';
 
-  static Widget _iconButton({required IconData icon, required VoidCallback onPressed, required bool compact}) {
-    // IconButton enforces a Material minimum tap target (48dp) regardless
-    // of `constraints`/`padding` — fine for the full-size card, but it blew
-    // the compact row's tight height budget with a silent-in-release
-    // overflow. A plain InkWell+Icon sidesteps that floor entirely.
-    if (compact) {
-      return InkWell(
-        onTap: onPressed,
-        customBorder: const CircleBorder(),
-        child: Padding(
-          padding: const EdgeInsets.all(2),
-          child: Icon(icon, size: 14),
-        ),
-      );
-    }
+  static Widget _iconButton({required IconData icon, required VoidCallback onPressed}) {
     return IconButton(
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
@@ -429,33 +391,31 @@ class _HpCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
 
     return Card(
-      margin: EdgeInsets.symmetric(vertical: compact ? 0 : 4),
       color: scheme.errorContainer.withValues(alpha: 0.35),
       child: Padding(
-        padding: EdgeInsets.symmetric(vertical: compact ? 2 : 8, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(compact ? 'HP' : 'Hit Points', style: TextStyle(fontSize: compact ? 8 : 11, color: Colors.grey[600])),
+            Text('Hit Points', style: TextStyle(fontSize: 11, color: Colors.grey[600])),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               mainAxisSize: MainAxisSize.min,
               children: [
-                _iconButton(icon: Icons.remove_circle_outline, onPressed: () => onQuickAdjust(_path, -1), compact: compact),
+                _iconButton(icon: Icons.remove_circle_outline, onPressed: () => onQuickAdjust(_path, -1)),
                 Flexible(
                   child: InkWell(
                     onTap: () => onAdjust(_path, value),
                     child: FittedBox(
                       child: Text('${value.toInt()} / ${max.toInt()}',
-                          style: TextStyle(fontSize: compact ? 14 : 20, fontWeight: FontWeight.bold)),
+                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ),
-                _iconButton(icon: Icons.add_circle_outline, onPressed: () => onQuickAdjust(_path, 1), compact: compact),
+                _iconButton(icon: Icons.add_circle_outline, onPressed: () => onQuickAdjust(_path, 1)),
               ],
             ),
-            if (temp > 0 && !compact) Text('+$temp temp', style: const TextStyle(fontSize: 11)),
+            if (temp > 0) Text('+$temp temp', style: const TextStyle(fontSize: 11)),
           ],
         ),
       ),
@@ -466,16 +426,17 @@ class _HpCard extends StatelessWidget {
 class _AcCard extends StatelessWidget {
   final Map<String, dynamic> attributes;
   final int dexScore;
-  final bool compact;
 
-  const _AcCard({required this.attributes, required this.dexScore, this.compact = false});
+  const _AcCard({required this.attributes, required this.dexScore});
 
   @override
   Widget build(BuildContext context) {
     final ac = ((attributes['ac'] as Map?)?.cast<String, dynamic>()) ?? {};
     final computed = defaultArmorClass(calc: ac['calc'] as String?, dexScore: dexScore);
-    final label = compact ? 'AC' : (computed == null ? 'AC (see raw data)' : 'Armor Class');
-    return _StatCard(label: label, value: _formatAc(ac, dexScore), compact: compact);
+    return _StatCard(
+      label: computed == null ? 'AC (see raw data)' : 'Armor Class',
+      value: _formatAc(ac, dexScore),
+    );
   }
 }
 
