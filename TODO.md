@@ -208,6 +208,40 @@ actually usable day-to-day at the table, roughly in this order:
     real "Hammer" (Inventory tab) — confirmed via `uiautomator` that the
     Inventory tab stayed selected — then toggled it back to leave his
     actor unchanged.
+- [x] ~~Replace the persistent compact HP/AC/Prof text summary with the
+      same card boxes, just shrunk, instead of a plain text line~~ — done.
+  - User feedback after the above: keep hiding the name/ability-grid on
+    scroll, but shrink the actual `_HpCard`/`_AcCard`/`_StatCard` boxes down
+    to a persistent compact row instead of replacing them with a text
+    summary — same boxes, smaller, always visible above the `TabBar`.
+  - `_HpCard`/`_AcCard`/`_StatCard` all gained a `compact` flag (smaller
+    padding/margin/font sizes, abbreviated labels — "HP"/"AC" instead of
+    "Hit Points"/"Armor Class", temp-HP line hidden); a new `_StatRow`
+    widget builds the shared HP/AC/Prof row once, so the compact and
+    full-size versions can't drift apart. HP/AC/Prof moved entirely out of
+    the collapsible header and into the always-visible `bottom` row
+    (`_StatRow(..., compact: true)`) — so the name/class line and ability
+    grid are the only things that actually collapse now; HP/AC/Prof are
+    never duplicated between expanded and collapsed states.
+  - **Bug found immediately, live**: the compact HP card's -/+ buttons
+    overflowed their row (`BOTTOM OVERFLOWED BY 25 PIXELS`, visible
+    on-device even in a release-style debug build). Root cause: Flutter's
+    `IconButton` enforces a Material minimum tap-target size (48dp)
+    regardless of the `constraints`/`padding` passed to it — fine for the
+    full-size card, but it blew the compact row's tight height budget.
+    Fixed by swapping to a plain `InkWell` wrapping a small `Icon` for the
+    compact variant only, which has no such enforced floor.
+  - `_headerExpandedHeight` recomputed accordingly (now just the
+    name/class line + ability grid, `_collapsibleHeaderHeight = 222`, plus
+    the always-reserved compact stat row `_compactStatRowHeight` and
+    `TabBar`) — measured live via `uiautomator dump` the same way as
+    before, not guessed.
+  - Verified live on William's real sheet: scrolling down hides the name
+    and ability grid while the same HP/AC/Prof boxes persist, just
+    smaller, above the tab bar; the compact HP card's -/+ buttons still
+    work at the smaller size (tested `9/9` → `8/9` → back to `9/9` via the
+    shrunk buttons, confirmed via screenshot each step); scrolling up
+    restores the full-size header exactly as before.
 
 ### Phase 2 — Player-facing parity with D&D Beyond
 - [ ] Rest handling: short/long rest actions that trigger the right resource resets.

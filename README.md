@@ -36,10 +36,12 @@ Talks to a self-hosted
 - **Optional per-system sheet template** (`lib/sheet_templates/`) — when the
   connected world's system is recognized, the actor screen renders a
   purpose-built, traditional-looking sheet instead of the generic tree: a
-  header/HP/AC/ability-score summary that collapses to a compact stat line
-  as you scroll a tab's content (more room for what you're actually
-  looking at) and expands back on scroll-up, then a tab bar (Skills &
-  Saves, Inventory, Spells, Features, Raw Data). The generic tree is still
+  header where the name and ability score grid collapse away as you scroll
+  a tab's content (more room for what you're actually looking at) and
+  expand back on scroll-up, while the HP/AC/Prof boxes stay put the whole
+  time — just shrunk, not replaced by a text summary — so they're always
+  reachable, then a tab bar (Skills & Saves, Inventory, Spells, Features,
+  Raw Data). The generic tree is still
   there underneath, unfiltered, as the "Raw Data" tab — the fallback for
   any system without a template, and the guarantee that a template never
   hides data it doesn't specifically surface. `Dnd5eSheetTemplate` is the
@@ -435,6 +437,35 @@ re-confirmed the earlier tab-selection-survives-an-edit fix still holds
 under this restructuring — toggled "equipped" on William's real "Hammer",
 confirmed via `uiautomator` that the Inventory tab stayed selected, then
 toggled it back to leave his actor as found.
+
+## Phase 1.5d (shrink the HP/AC/Prof boxes, don't replace them) — also verified live
+
+Follow-up to the above: keep hiding the name/ability-grid on scroll, but
+instead of replacing HP/AC/Prof with a plain text summary once collapsed,
+shrink the same `_HpCard`/`_AcCard`/`_StatCard` boxes down and keep them
+persistently visible above the `TabBar` the whole time — full size at the
+top, small while scrolled, never duplicated or swapped for different
+widgets. `_HpCard`/`_AcCard`/`_StatCard` gained a `compact` flag (smaller
+padding, smaller fonts, abbreviated labels — "HP"/"AC" instead of "Hit
+Points"/"Armor Class") and a shared `_StatRow` widget builds the row once
+for both states, so they can't drift out of sync. HP/AC/Prof moved out of
+the collapsible part of the header entirely and into the app bar's
+always-visible `bottom`, alongside the `TabBar`.
+
+Found a real bug immediately: the compact HP card's -/+ buttons overflowed
+their row (visible as an on-device `BOTTOM OVERFLOWED BY 25 PIXELS`
+banner). Root cause: Flutter's `IconButton` enforces a Material minimum
+48dp tap target regardless of the `constraints`/`padding` passed to it —
+fine at full size, but it blew the compact row's tight height budget. Fixed
+by swapping to a plain `InkWell` wrapping a small `Icon` for the compact
+variant, which has no such enforced floor.
+
+Verified live on William's real sheet: scrolling down hides the name and
+ability grid while the same HP/AC/Prof boxes persist, just smaller, above
+the tab bar; the compact HP card's -/+ buttons still work at the smaller
+size (`9/9` → `8/9` → back to `9/9`, confirmed via screenshot at each
+step, so his actor was left as found); scrolling up restores the full-size
+header exactly as before.
 
 ## Remaining before this is more than a PoC
 
