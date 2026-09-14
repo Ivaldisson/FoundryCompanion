@@ -30,6 +30,13 @@ Talks to a self-hosted
   spell slots, and item fields — see "Why generic leaf-editing" below.
 - **Live chat** (`lib/screens/chat_screen.dart`) — loads recent history via
   `GET /chat`, then streams new messages live.
+- **Optional per-system sheet template** (`lib/sheet_templates/`) — when the
+  connected world's system is recognized, the actor screen renders a
+  purpose-built, traditional-looking sheet instead of the generic tree
+  (header, HP, AC, ability scores, saves, skills, currency, items); the
+  generic tree is still there underneath, collapsed as "Ruwe data," and is
+  the fallback for any system without a template. `Dnd5eSheetTemplate` is
+  the reference implementation — see "Why an optional sheet template" below.
 
 ## Why SSE instead of `web_socket_channel`
 
@@ -78,6 +85,33 @@ long-press mechanism that adjusts HP also adjusts a spell slot or an item's
 quantity, with zero field-name-specific code — "inventory" and
 "spellcasting tracker" fall out of "writable sheet" for free, since items
 and spell slots are just more leaves in the same tree.
+
+## Why an optional per-system sheet template
+
+The generic tree is honest and universal, but doesn't look or feel like a
+character sheet — a real sheet layout (ability score blocks, a skill list,
+an HP bar) unavoidably encodes assumptions about what fields exist, which
+is exactly what the generic renderer avoids. Rather than compromise that
+for every system, `lib/sheet_templates/sheet_template.dart` defines a small
+`SheetTemplate` interface: `ActorSheetScreen` looks one up by the connected
+world's `systemId` and renders it if found, falling back to the generic
+tree otherwise (also true per-actor: `Dnd5eSheetTemplate` itself falls back
+for any `type` other than `"character"`, so an NPC in a dnd5e world doesn't
+get a bogus half-populated character sheet). Every template embeds the full
+generic tree too, collapsed, so nothing a template doesn't specifically
+surface is ever inaccessible.
+
+`Dnd5eSheetTemplate` is the reference implementation, and reuses the Phase 1
+write mechanism directly rather than inventing new ones — its ability score
+cards long-press into the same `/increase`/`/decrease` adjust dialog, keyed
+off the same dot-path (`system.abilities.str.value`) the generic tree
+already computes. Since the raw document has no derived values (see above),
+`lib/sheet_templates/dnd5e_formulas.dart` computes standard 5e tabletop math
+itself — ability modifier, proficiency bonus, skill/save bonus — and is
+deliberately conservative: it ignores arbitrary `bonuses.check`/`.save`
+formula strings rather than evaluate untrusted formulas, and only computes
+AC for the common `calc: "default"` case, showing the raw value or "—"
+otherwise instead of a guessed-wrong number.
 
 ## Other things confirmed from source rather than assumed
 
@@ -215,11 +249,48 @@ Not yet live-tested: item fields (`items[i].system.quantity`/`equipped`)
 and prepared-spell slots, since the probe actor had neither — see
 `TODO.md`.
 
+## Phase 1.5 (dnd5e sheet template) — also verified live
+
+Same pattern again: a disposable "Sheet Template Test" actor (STR 16, DEX
+14, an embedded `Fighter` class item at level 5, Athletics proficiency) was
+created via `POST /create` so every computed number had a hand-checkable
+answer, driven through the rebuilt app via `adb`/`uiautomator`, and deleted
+afterward.
+
+**A real bug turned up immediately**: the template rendered a completely
+blank screen — no error, no red screen, nothing in logcat. Root cause: a
+`Row(crossAxisAlignment: CrossAxisAlignment.stretch)` as a direct `ListView`
+child. `stretch` needs a bounded height to stretch into; a `ListView` gives
+unbounded height to its children (normal for scrolling), so this throws a
+`RenderFlex` layout exception — but *layout*-phase exceptions (unlike
+*build*-phase ones) don't get Flutter's usual red-screen substitution, and
+none of the usual tools helped: `flutter analyze`/`flutter test` were clean
+(runtime issue, not static), a `try/catch` around the template's `build()`
+caught nothing (the throw happens later, during layout), logcat showed
+nothing under any tag on this device. Root-caused by bisection — swap the
+real body for a trivial `Center(Text(...))` to confirm the wiring was fine,
+then add pieces of the real content back one at a time. Fixed by wrapping
+that `Row` in `IntrinsicHeight`. Full writeup in `TODO.md`.
+
+With that fixed, verified live end-to-end:
+- Every computed number checked out by hand: STR/DEX modifiers **+3**/**+2**,
+  proficiency bonus **+3** (level 5 → `2 + floor((5-1)/4)`), Athletics
+  **+5** (DEX mod + proficiency, since this skill's stored `ability` was
+  `dex`, not the "expected" `str` — read from the data as stored, not
+  assumed), AC **12** (`10 + dex mod`, `calc: "default"`).
+- Tapped the STR ability card → roll dialog pre-filled `1d20 + 3` → rolled
+  → confirmed in Foundry's chat log (`1d20 + 3 = 12`).
+- Tapped HP's `-` button (the dedicated quick-adjust, not the dialog) →
+  `GET /get` confirmed `hp.value` went `30` → `29`.
+- Expanded "Ruwe data" at the bottom — the full generic tree, same as
+  Phase 1, still there and interactive underneath the template.
+
 ## Remaining before this is more than a PoC
 
 Nothing acceptance-critical is outstanding. Worth doing next: live-test
-item/spell-slot editing against a populated actor, decide whether to
-report the SSE fixture mismatch upstream to ThreeHats, and the out-of-scope
-items above (dedicated GM tools, push notifications, offline caching, real
-multi-user auth) once this grows past PoC scope. See `TODO.md` for the
-fuller roadmap.
+item/spell-slot editing and the sheet template against a populated actor,
+implement a `SheetTemplate` for a second system whenever there's a live
+world to test one against, decide whether to report the SSE fixture
+mismatch upstream to ThreeHats, and the out-of-scope items above (dedicated
+GM tools, push notifications, offline caching, real multi-user auth) once
+this grows past PoC scope. See `TODO.md` for the fuller roadmap.

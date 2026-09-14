@@ -64,7 +64,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   Future<void> _chooseClient(FoundryClientInfo c) async {
     final config = context.read<RelayConfig>();
-    await config.selectClient(clientId: c.clientId, label: c.worldTitle);
+    await config.selectClient(clientId: c.clientId, label: c.worldTitle, systemId: c.systemId);
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => const ActorPickerScreen()),

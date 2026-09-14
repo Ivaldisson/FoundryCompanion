@@ -15,6 +15,7 @@ class RelayConfig extends ChangeNotifier {
   static const _keyApiKey = 'relay_api_key';
   static const _keyClientId = 'relay_client_id';
   static const _keyClientLabel = 'relay_client_label';
+  static const _keySystemId = 'relay_system_id';
 
   static const _secureStorage = FlutterSecureStorage();
 
@@ -22,6 +23,7 @@ class RelayConfig extends ChangeNotifier {
   String apiKey = '';
   String? clientId;
   String? clientLabel;
+  String? systemId;
   bool _loaded = false;
 
   bool get isLoaded => _loaded;
@@ -33,6 +35,7 @@ class RelayConfig extends ChangeNotifier {
     baseUrl = prefs.getString(_keyBaseUrl) ?? '';
     clientId = prefs.getString(_keyClientId);
     clientLabel = prefs.getString(_keyClientLabel);
+    systemId = prefs.getString(_keySystemId);
 
     apiKey = await _secureStorage.read(key: _keyApiKey) ?? '';
     // One-time migration: earlier builds stored the key in plain
@@ -60,12 +63,18 @@ class RelayConfig extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> selectClient({required String clientId, required String label}) async {
+  Future<void> selectClient({required String clientId, required String label, String? systemId}) async {
     final prefs = await SharedPreferences.getInstance();
     this.clientId = clientId;
     clientLabel = label;
+    this.systemId = systemId;
     await prefs.setString(_keyClientId, clientId);
     await prefs.setString(_keyClientLabel, label);
+    if (systemId != null) {
+      await prefs.setString(_keySystemId, systemId);
+    } else {
+      await prefs.remove(_keySystemId);
+    }
     notifyListeners();
   }
 
@@ -74,11 +83,13 @@ class RelayConfig extends ChangeNotifier {
     await prefs.remove(_keyBaseUrl);
     await prefs.remove(_keyClientId);
     await prefs.remove(_keyClientLabel);
+    await prefs.remove(_keySystemId);
     await _secureStorage.delete(key: _keyApiKey);
     baseUrl = '';
     apiKey = '';
     clientId = null;
     clientLabel = null;
+    systemId = null;
     notifyListeners();
   }
 }

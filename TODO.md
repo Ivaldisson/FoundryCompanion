@@ -35,8 +35,10 @@ actually usable day-to-day at the table, roughly in this order:
   - `items[]` was already rendered generically by `DynamicJsonView`; the new
     leaf-editing mechanism makes `items[i].system.quantity`/`equipped`/etc.
     editable the same way as any other field, with no inventory-specific code.
-    Not separately live-tested against a real item (the probe actor had no
-    items) — worth a quick pass next time there's a populated actor to test.
+    A class item (`Fighter`) was live-tested for display in the Phase 1.5
+    pass below, but `quantity`/`equipped` editing on an actual equipment
+    item is still untested — worth a quick pass next time there's a
+    populated actor to test.
 - [x] ~~Spellcasting/resource tracker: slots and charges, decrement on cast/use.~~ —
       covered for free by the same mechanism.
   - `system.spells.spell1-9/pact` and `system.resources.*` are just more
@@ -51,6 +53,50 @@ actually usable day-to-day at the table, roughly in this order:
     `load()` moves any pre-existing plaintext key over and scrubs it from
     prefs — verified live: the already-configured test phone opened straight
     to the actor list on the rebuilt app with no re-entry of the key needed.
+
+### Phase 1.5 — Traditional character sheet look
+- [x] ~~Give the app a traditional character-sheet look instead of the generic
+      JSON tree.~~ — done, as an optional per-system template layer.
+  - Discussed the tradeoff first: a real "traditional sheet" layout (ability
+    score blocks, skill list, HP bar) unavoidably encodes assumptions about
+    what fields exist, which is what the generic renderer exists to avoid.
+    Landed on a `SheetTemplate` abstraction (`lib/sheet_templates/`) —
+    `ActorSheetScreen` picks a template by the connected world's `systemId`
+    (now persisted in `RelayConfig`, previously only `clientId`/`clientLabel`
+    were); if none matches, or the actor's `type` doesn't fit (e.g. an NPC
+    in a dnd5e world), it falls back to the generic tree, embedded as a
+    collapsed "Ruwe data" section inside the template too so nothing is
+    ever hidden.
+  - Shipped `Dnd5eSheetTemplate` as the reference implementation:
+    header (name/class/level), HP block with dedicated -/+ (not tap-to-roll —
+    HP isn't something you roll), AC, ability score cards, saving throws,
+    skills, currency, and a simple items list. All writes still go through
+    the same generic `/increase`/`/decrease`/`/update` mechanism from Phase 1
+    — `POST /increase` already takes a dot-path `attribute` string, which is
+    exactly what `DynamicJsonView` computes per leaf, so the template reuses
+    it directly instead of introducing new write paths.
+  - Deliberately does **not** use the relay's dnd5e-specific `/dnd5e/*`
+    routes (spell slot consumption, inventory equip endpoints) — would work
+    for this one system but reintroduces exactly the coupling the PoC exists
+    to avoid.
+  - The raw `/get` document has no derived values (see Phase 1 above), so
+    the template computes standard 5e tabletop math itself
+    (`lib/sheet_templates/dnd5e_formulas.dart`, unit tested): ability
+    modifier, proficiency bonus, skill/save bonus. Deliberately conservative
+    — ignores `bonuses.check`/`.save` formula strings (arbitrary Foundry
+    roll formulas, unsafe to evaluate client-side) and only computes AC for
+    the common `calc: "default"` case, showing the raw `flat` value or "—"
+    otherwise rather than a guessed-wrong number.
+  - Verified live end-to-end against a probe actor (STR 16, DEX 14, Fighter
+    level 5): every computed number checked out by hand
+    (mod +3/+2, proficiency +3, Athletics +5, AC 12); tapped an ability card
+    → rolled `1d20 + 3`, confirmed in Foundry's chat; tapped HP -1 →
+    confirmed `29` via `GET /get`. Deleted the probe actor afterward.
+  - **Next system**: implement `SheetTemplate` for another system (Pathfinder
+    2e is the next most-likely candidate given Foundry's ecosystem) and
+    register it in `SheetTemplateRegistry` — the mechanism is generic, only
+    the per-system widget/formula file needs writing. No live system to test
+    against yet, so left for whenever there's a second world to point this at.
 
 ### Phase 2 — Player-facing parity with D&D Beyond
 - [ ] Rest handling: short/long rest actions that trigger the right resource resets.
@@ -95,6 +141,8 @@ actually usable day-to-day at the table, roughly in this order:
   - Removed via `DELETE /delete?uuid=Actor.29yqdOgjmpHlksRA` on the relay; confirmed gone via `GET /search?filter=documentType:Actor` (no `WorldEntity` results left, only compendium entries). The test world now has no actors — point the app at a real one, or create a new disposable test actor the same way if needed again.
 - [x] ~~Clean up the "Phase1 Test Actor" created to live-verify the writable-sheet work~~ — deleted.
   - Same pattern as above: created via `POST /create`, used to verify the long-press adjust/edit-leaf/conditions mechanism end-to-end on-device, removed via `DELETE /delete?uuid=Actor.skQGXYD99SldXJtF` once done. Test world has no actors again.
+- [x] ~~Clean up the "Sheet Template Test" probe actor created to live-verify the dnd5e sheet template~~ — deleted.
+  - Same pattern as the previous two: created via `POST /create` (with a `str`/`dex`/embedded `Fighter` class item for checkable math), used to verify the template end-to-end on-device, removed via `DELETE /delete?uuid=Actor.chITmcD0lxtKXirM`. Test world has no actors again.
 - [ ] Consider reporting the SSE fixture mismatch upstream to ThreeHats (`foundryvtt-rest-api-relay`) — see Bugs below.
 - [ ] Explore the relay endpoints not yet touched by the app: `GET /rolls`/`GET /lastroll` (roll history), `/structure` + folders (for actor organization once there's more than one). (`GET /sheet` was explored — it's a PNG/JPEG screenshot, not JSON; see Phase 1 above. Could still be worth showing as a supplementary visual, but it's not a data source.)
 - [ ] Live-test the generic leaf-editing mechanism (Phase 1) against an actor that actually has items and prepared spells — the probe actor used to verify it was a fresh level-1 character with neither, so `items[i].system.quantity/equipped` and `system.spells.spell1-9` edits are implemented but not independently confirmed live yet.
@@ -115,6 +163,11 @@ actually usable day-to-day at the table, roughly in this order:
   - Live testing showed the real relay sends **every** event as literally `event: chat-create` regardless of the actual operation, with the payload nested one level deeper: `{"data": {"data": <message or {"id":...}>, "eventType": "create"|"update"|"delete"}, "type": "chat-event"}`. Confirmed for both `create` and `delete` against the live relay.
   - Fix: `ChatScreen._unwrapChatEvent()` now reads the operation from the inner `eventType` field instead of the SSE event name, with a flat-shape fallback in case the relay is fixed upstream later.
   - Not independently verified: the `update` case — there's no REST endpoint to trigger a chat message edit, so this is coded by inference from the same nesting pattern as `create`/`delete`, not confirmed live.
+- [x] ~~New dnd5e sheet template rendered a completely blank screen (below the Condities row) — no error, no red screen, no crash, nothing in logcat~~ — fixed.
+  - Root cause: `Row(crossAxisAlignment: CrossAxisAlignment.stretch, ...)` (the HP/AC/Proficiency row) as a direct child of a `ListView`. `CrossAxisAlignment.stretch` needs the `Row` to know its own bounded height to stretch children into; a `ListView` gives its children *unbounded* height (normal for a vertically-scrolling list). That combination throws a `RenderFlex` layout exception — but layout-phase exceptions (unlike build-phase ones) don't get Flutter's usual red-screen `ErrorWidget` substitution, and on this device/renderer (Impeller/Vulkan) nothing reached logcat either — the whole list's paint just silently aborted, with the exception fully invisible.
+  - Diagnosis took real bisection since normal tools didn't help: `flutter analyze`/`flutter test` were clean (this is a *runtime layout* issue, not a static/build one); a `try/catch` wrapped around the template's `build()` caught nothing (the throw happens during the later *layout* pass, not while the widget tree is being constructed); logcat showed nothing under any tag. What worked: replacing the real body with a trivial `Center(Text(...))` to confirm the wiring (`Expanded`/`Column` in `ActorSheetScreen`) was fine, then adding pieces of the real content back one at a time until the exact widget that reintroduced the blank screen was found.
+  - Fix: wrap that `Row` in `IntrinsicHeight`, which gives it a bounded height computed from its children's intrinsic height, letting `stretch` work safely — `lib/sheet_templates/dnd5e_sheet_template.dart`.
+  - Also kept a `try/catch` around `Dnd5eSheetTemplate.build()` regardless (falls back to the generic tree on any exception) — doesn't catch layout-phase issues like this one, but is still worth having for genuine data-shape/build-time surprises on unusual actors.
 - [ ] Whisper/private messages, and non-`base` chat message types (emote, OOC, in-character) haven't been exercised — `ChatMessage.fromJson` should handle them (same shape, different `type`/`whisper` fields) but this is untested against a real whisper.
 - [ ] No retry/backoff on a genuinely dead relay (e.g. relay container restarts) beyond the manual "Opnieuw verbinden" button on the chat screen — worth revisiting if this becomes more than a PoC.
 

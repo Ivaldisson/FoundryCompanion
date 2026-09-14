@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../config/relay_config.dart';
 import '../models/relay_models.dart';
 import '../services/relay_client.dart';
+import '../sheet_templates/sheet_template.dart';
 import '../widgets/dynamic_json_view.dart';
 import 'chat_screen.dart';
 
@@ -62,19 +63,26 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
     super.dispose();
   }
 
-  Future<void> _openRollDialog(String path, num value) async {
-    final formulaController = TextEditingController(text: '1d20 + $value');
-    final flavorController = TextEditingController(text: path);
+  /// Generic roll dialog: pre-filled with [defaultFormula]/[defaultFlavor]
+  /// under [title]. Used both for a tapped numeric leaf (title/formula
+  /// derived from its raw value) and for a sheet template's computed rolls
+  /// (e.g. `1d20 + <ability mod>`) — the dialog itself doesn't care where
+  /// the default came from.
+  Future<void> _openRollDialogFor({
+    required String title,
+    required String defaultFormula,
+    required String defaultFlavor,
+  }) async {
+    final formulaController = TextEditingController(text: defaultFormula);
+    final flavorController = TextEditingController(text: defaultFlavor);
 
     final formula = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Roll — $path'),
+        title: Text(title),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Aangetikte waarde: $value', style: const TextStyle(color: Colors.grey)),
-            const SizedBox(height: 12),
             TextField(
               controller: formulaController,
               decoration: const InputDecoration(labelText: 'Formule', border: OutlineInputBorder()),
@@ -119,6 +127,15 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
       _showError(e.message);
     }
   }
+
+  /// `DynamicJsonView.onTapNumber` — the generic tree only knows a leaf's
+  /// raw path and value, so it gets the plainest possible roll: the value
+  /// itself as a flat `1d20 + value` bonus.
+  Future<void> _openRollForLeaf(String path, num value) => _openRollDialogFor(
+        title: 'Roll — $path',
+        defaultFormula: '1d20 + $value',
+        defaultFlavor: path,
+      );
 
   /// Long-press on a numeric leaf: quick -1/+1, or a custom amount, via the
   /// relay's dedicated `/increase`/`/decrease` endpoints — same JSON [path]
@@ -176,7 +193,16 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
     );
 
     if (delta == null || delta == 0 || !mounted) return;
+    await _applyAdjust(path, delta);
+  }
 
+  /// Applies [delta] to [path] with no dialog — for a sheet template's
+  /// dedicated -/+ buttons (e.g. HP), where a quick ±1 is the common case
+  /// and a confirmation step would just be friction. Shares the same
+  /// underlying call as the dialog-driven `_openAdjustDialog` above.
+  Future<void> _quickAdjust(String path, num delta) => _applyAdjust(path, delta);
+
+  Future<void> _applyAdjust(String path, num delta) async {
     try {
       await _client.adjustAttribute(widget.uuid, path, delta);
       _load();
@@ -331,31 +357,53 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
               );
             }
             final data = snapshot.data!;
-            return ListView(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+            final rawDataView = DynamicJsonView(
+              value: data.actor,
+              path: '',
+              label: widget.name,
+              onTapNumber: _openRollForLeaf,
+              onLongPressNumber: _openAdjustDialog,
+              onEditLeaf: _onEditLeaf,
+            );
+            final template = SheetTemplateRegistry.forSystem(context.read<RelayConfig>().systemId);
+
+            return Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: Text(
-                    'Tik op een getal voor een roll, houd ingedrukt om aan te passen. '
-                    'Tik op tekst/aan-uit om te bewerken. Volledige, onbewerkte actor-JSON — '
-                    'geen system-specifieke velden.',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                  ),
-                ),
                 _ConditionsRow(
                   effects: data.effects,
                   error: data.effectsError,
                   onAdd: _openAddConditionDialog,
                   onRemove: _removeCondition,
                 ),
-                DynamicJsonView(
-                  value: data.actor,
-                  path: '',
-                  label: widget.name,
-                  onTapNumber: _openRollDialog,
-                  onLongPressNumber: _openAdjustDialog,
-                  onEditLeaf: _onEditLeaf,
+                Expanded(
+                  child: template != null
+                      ? template.build(
+                          context,
+                          SheetTemplateContext(
+                            uuid: widget.uuid,
+                            actor: data.actor,
+                            onRoll: _openRollDialogFor,
+                            onAdjust: _openAdjustDialog,
+                            onQuickAdjust: _quickAdjust,
+                            onEditLeaf: _onEditLeaf,
+                            rawDataView: rawDataView,
+                          ),
+                        )
+                      : ListView(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                              child: Text(
+                                'Tik op een getal voor een roll, houd ingedrukt om aan te passen. '
+                                'Tik op tekst/aan-uit om te bewerken. Volledige, onbewerkte actor-JSON — '
+                                'geen system-specifieke velden.',
+                                style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                              ),
+                            ),
+                            rawDataView,
+                          ],
+                        ),
                 ),
               ],
             );
