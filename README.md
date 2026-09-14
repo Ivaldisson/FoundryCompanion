@@ -85,8 +85,9 @@ Tested directly against `192.168.178.19:3010` and the real test world
 (`fvtt_39e66babbdbe2548`, world "Test", dnd5e). `GET /clients` returned
 exactly the shape `RelayClient` expects. The world had no actors yet, so a
 disposable one ("PoC Test Actor") was created via `POST /create` to exercise
-the rest of the loop — it's still there, meant for you to point the app at
-for your own manual pass; delete it (or ask me to) once you don't need it.
+the rest of the loop, then removed again via `DELETE /delete` once testing
+was done — the test world currently has no actors, so point the app at a
+real one, or create a new disposable test actor the same way if needed.
 
 Confirmed working end-to-end, including a run of the actual Dart
 `RelayClient` code (not just curl) against the live relay:
@@ -139,11 +140,11 @@ All three PoC acceptance criteria confirmed on the actual compiled app
 (debug APK, installed via `adb install`, driven via `uiautomator`), not just
 curl:
 
-1. ✅ **Actor loads, fully dynamic.** Opened "PoC Test Actor" — the disposable
-   test actor created via `POST /create` for this pass, still in the test
-   world for your own manual testing (delete it, or ask me to, whenever).
-   The whole nested `system.abilities.str.{value,proficient,max,...}` tree
-   rendered correctly with no 5e-specific code.
+1. ✅ **Actor loads, fully dynamic.** Opened "PoC Test Actor" — a disposable
+   test actor created via `POST /create` for this pass and deleted again
+   afterward (see above). The whole nested
+   `system.abilities.str.{value,proficient,max,...}` tree rendered correctly
+   with no 5e-specific code.
 2. ✅ **Roll round-trip.** Tapped `system.abilities.str.value` (10) →
    roll dialog pre-filled `1d20 + 10` → tapped Roll → SnackBar showed
    `1d20 + 10 = 30 CRIT!` → confirmed in the app's own chat screen moments
@@ -155,8 +156,7 @@ curl:
 
 ## Remaining before this is more than a PoC
 
-Nothing acceptance-critical is outstanding. Worth doing next: delete or
-keep "PoC Test Actor" per your call, decide whether to report the SSE
-fixture mismatch upstream to ThreeHats, and the out-of-scope items above
-(auth, offline caching, GM dashboard) once this grows past PoC scope. See
-`TODO.md` for the fuller roadmap.
+Nothing acceptance-critical is outstanding. Worth doing next: decide
+whether to report the SSE fixture mismatch upstream to ThreeHats, and the
+out-of-scope items above (auth, offline caching, GM dashboard) once this
+grows past PoC scope. See `TODO.md` for the fuller roadmap.
