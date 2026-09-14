@@ -58,7 +58,8 @@ actually usable day-to-day at the table, roughly in this order:
 
 ## Next Steps
 
-- [ ] Decide what to do with the "PoC Test Actor" left in the test world (created via `POST /create` to have something to point the app at) — keep it for further manual testing, or have it deleted.
+- [x] ~~Decide what to do with the "PoC Test Actor" left in the test world (created via `POST /create` to have something to point the app at) — keep it for further manual testing, or have it deleted.~~ — deleted.
+  - Removed via `DELETE /delete?uuid=Actor.29yqdOgjmpHlksRA` on the relay; confirmed gone via `GET /search?filter=documentType:Actor` (no `WorldEntity` results left, only compendium entries). The test world now has no actors — point the app at a real one, or create a new disposable test actor the same way if needed again.
 - [ ] Consider reporting the SSE fixture mismatch upstream to ThreeHats (`foundryvtt-rest-api-relay`) — see Bugs below.
 - [ ] Explore the relay endpoints not yet touched by the app: `GET /rolls`/`GET /lastroll` (roll history), `GET /sheet` (Foundry's own computed sheet, vs. the raw `/get` document this PoC uses — could be a nicer source for a future non-raw sheet view), `/structure` + folders (for actor organization once there's more than one).
 - [ ] From the brief's own "onthouden voor later" list, once this grows past PoC scope: auth layer for multiple players, offline-first caching, GM dashboard (initiative tracker, NPC lookup, player status).
