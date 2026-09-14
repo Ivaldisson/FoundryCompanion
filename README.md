@@ -1,7 +1,7 @@
 # Foundry Companion — PoC
 
-Flutter proof-of-concept for a system-agnostic FoundryVTT companion app, per
-`foundry-companion-poc-brief.md`. Talks to a self-hosted
+Flutter proof-of-concept for a system-agnostic FoundryVTT companion app.
+Talks to a self-hosted
 [`foundryvtt-rest-api-relay`](https://github.com/ThreeHats/foundryvtt-rest-api-relay)
 (Go relay) over plain HTTP/SSE.
 
@@ -16,7 +16,7 @@ Flutter proof-of-concept for a system-agnostic FoundryVTT companion app, per
   whatever JSON `GET /get` returns for an actor and builds a collapsible
   widget tree purely from each value's runtime type (map / list / number /
   bool / string / null). No D&D 5e (or any system) field names are
-  hardcoded — this is the actual PoC risk the brief called out, and it's
+  hardcoded — this is the core risk this PoC set out to prove, and it's
   been tested against a real 5e actor payload (see below).
 - **Roll trigger** — every numeric leaf in the sheet is tappable; tapping
   opens a dialog pre-filled with a formula and the JSON path as flavor text,
@@ -25,15 +25,14 @@ Flutter proof-of-concept for a system-agnostic FoundryVTT companion app, per
 - **Live chat** (`lib/screens/chat_screen.dart`) — loads recent history via
   `GET /chat`, then streams new messages live.
 
-## Deviation from the brief: SSE instead of `web_socket_channel`
+## Why SSE instead of `web_socket_channel`
 
-The brief's tech stack lists `web_socket_channel` for the live chat listener.
-While implementing this, I pulled the relay's actual source
-(`go-relay/internal/handler/routes.go` and `sse.go` in
-`ThreeHats/foundryvtt-rest-api-relay`) to get the real endpoint shapes before
-writing any Dart, per the brief's own task #3 ("JSON-shapes documenteren
-voordat er Flutter-code komt"). That turned up something the brief didn't
-anticipate: the WebSocket connection in this system is only between the
+The obvious choice for "live chat listener" is a WebSocket package like
+`web_socket_channel`. Before writing any Dart, I pulled the relay's actual
+source (`go-relay/internal/handler/routes.go` and `sse.go` in
+`ThreeHats/foundryvtt-rest-api-relay`) to get the real endpoint shapes first.
+That turned up something not obvious from the outside: the WebSocket
+connection in this system is only between the
 **Foundry module and the relay** (`/relay`, `/ws/api`). The client-facing
 real-time channel is **Server-Sent Events** on `GET /chat/subscribe`
 (confirmed via `test-examples/sse-chat-subscribe.ts` in the relay repo, which
@@ -59,7 +58,7 @@ own test example uses a custom-fetch `EventSource` polyfill instead).
   game-system-specific fields live, which is why the renderer has to be
   fully generic.
 
-## Not done (matches "bewust niet" in the brief)
+## Out of scope for this PoC
 
 Auth/user management beyond the one API key, inventory/spell trackers, GM
 tools, push notifications, offline caching.
@@ -75,7 +74,7 @@ On first launch you'll land on the setup screen. Point it at your relay
 (e.g. `http://192.168.178.19:3010`), paste the API key from the relay
 dashboard, test the connection, and pick the test world.
 
-Note: the relay is plain HTTP (no TLS) per the brief, so
+Note: the relay is plain HTTP (no TLS), so
 `android:usesCleartextTraffic="true"` is set in
 `android/app/src/main/AndroidManifest.xml` — this'll need to change once the
 relay sits behind the planned Cloudflare Tunnel (`wss://`/`https://`).
@@ -158,6 +157,6 @@ curl:
 
 Nothing acceptance-critical is outstanding. Worth doing next: delete or
 keep "PoC Test Actor" per your call, decide whether to report the SSE
-fixture mismatch upstream to ThreeHats, and the items already flagged in
-the brief itself (auth, offline caching, GM dashboard) once this grows
-past PoC scope.
+fixture mismatch upstream to ThreeHats, and the out-of-scope items above
+(auth, offline caching, GM dashboard) once this grows past PoC scope. See
+`TODO.md` for the fuller roadmap.
