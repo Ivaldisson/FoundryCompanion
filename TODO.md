@@ -1,9 +1,10 @@
-# TODO — Foundry Companion PoC
+# TODO — Foundry Companion
 
-## Roadmap: PoC → usable D&D Beyond replacement
+## Roadmap: core loop → usable D&D Beyond replacement
 
-The PoC proves the core loop (view actor, roll, live chat). To become something
-actually usable day-to-day at the table, roughly in this order:
+The core loop (view actor, roll, live chat) is built and verified live, and
+Phase 1/1.5 below are largely done too. To become something actually usable
+day-to-day at the table, roughly in this order:
 
 ### Phase 1 — Solidify the single-player core
 - [x] ~~Switch from the raw `/get` document to the `/sheet` endpoint (Foundry's own
@@ -77,8 +78,8 @@ actually usable day-to-day at the table, roughly in this order:
     it directly instead of introducing new write paths.
   - Deliberately does **not** use the relay's dnd5e-specific `/dnd5e/*`
     routes (spell slot consumption, inventory equip endpoints) — would work
-    for this one system but reintroduces exactly the coupling the PoC exists
-    to avoid.
+    for this one system but reintroduces exactly the coupling the app's
+    system-agnostic design exists to avoid.
   - The raw `/get` document has no derived values (see Phase 1 above), so
     the template computes standard 5e tabletop math itself
     (`lib/sheet_templates/dnd5e_formulas.dart`, unit tested): ability
@@ -375,7 +376,7 @@ actually usable day-to-day at the table, roughly in this order:
       the relay connection returns — right now the app is unusable the moment the
       relay drops, which is the opposite of what you want at a physical table.
 - [ ] Retry/backoff for a genuinely dead relay (noted below too) — the manual
-      reconnect button is fine for a PoC, not for something you hand to other players.
+      reconnect button is fine for now, not for something you hand to other players.
 - [ ] Auth layer once more than one person uses this against the same relay —
       right now it's a single shared API key with no per-user identity or permissions.
 
@@ -422,7 +423,7 @@ actually usable day-to-day at the table, roughly in this order:
 - [ ] Consider reporting the SSE fixture mismatch upstream to ThreeHats (`foundryvtt-rest-api-relay`) — see Bugs below.
 - [ ] Explore the relay endpoints not yet touched by the app: `GET /rolls`/`GET /lastroll` (roll history), `/structure` + folders (for actor organization once there's more than one). (`GET /sheet` was explored — it's a PNG/JPEG screenshot, not JSON; see Phase 1 above. Could still be worth showing as a supplementary visual, but it's not a data source.)
 - [ ] Live-test the generic leaf-editing mechanism (Phase 1) against an actor that actually has items and prepared spells — the probe actor used to verify it was a fresh level-1 character with neither, so `items[i].system.quantity/equipped` and `system.spells.spell1-9` edits are implemented but not independently confirmed live yet.
-- [ ] From the brief's own "onthouden voor later" list, once this grows past PoC scope: auth layer for multiple players, offline-first caching, GM dashboard (initiative tracker, NPC lookup, player status).
+- [ ] From the brief's own "onthouden voor later" list, further out: auth layer for multiple players, offline-first caching, GM dashboard (initiative tracker, NPC lookup, player status).
 - [ ] Get the relay reachable externally via the planned Cloudflare Tunnel (`wss://<planned-subdomain>`) — needed before testing the app off the home network. When that happens, revisit `android:usesCleartextTraffic="true"` in `android/app/src/main/AndroidManifest.xml`, since the tunnel would be TLS.
 
 ## Bugs
@@ -488,7 +489,7 @@ actually usable day-to-day at the table, roughly in this order:
     → the Inventory tab was still `selected="true"`. Also confirmed on the
     Spells tab's prepared-toggle edit.
 - [ ] Whisper/private messages, and non-`base` chat message types (emote, OOC, in-character) haven't been exercised — `ChatMessage.fromJson` should handle them (same shape, different `type`/`whisper` fields) but this is untested against a real whisper.
-- [ ] No retry/backoff on a genuinely dead relay (e.g. relay container restarts) beyond the manual "Opnieuw verbinden" button on the chat screen — worth revisiting if this becomes more than a PoC.
+- [ ] No retry/backoff on a genuinely dead relay (e.g. relay container restarts) beyond the manual "Reconnect" button on the chat screen — worth revisiting before handing this to other players.
 
 ## Install/Deploy Gotchas
 
