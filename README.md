@@ -183,8 +183,9 @@ flutter run   # or: flutter build apk --debug
 ```
 
 On first launch you'll land on the setup screen. Point it at your relay
-(e.g. `http://192.168.178.19:3010`), paste the API key from the relay
-dashboard, test the connection, and pick the test world.
+(e.g. `http://192.168.1.50:3010`, a typical LAN address), paste the API
+key from the relay dashboard, test the connection, and pick the test
+world.
 
 Note: the relay is plain HTTP (no TLS), so
 `android:usesCleartextTraffic="true"` is set in
@@ -193,8 +194,8 @@ relay sits behind the planned Cloudflare Tunnel (`wss://`/`https://`).
 
 ## Verified against the live relay
 
-Tested directly against `192.168.178.19:3010` and the real test world
-(`fvtt_39e66babbdbe2548`, world "Test", dnd5e). `GET /clients` returned
+Tested directly against the relay on the local network and the real test
+world (world "Test", dnd5e). `GET /clients` returned
 exactly the shape `RelayClient` expects. The world had no actors yet, so a
 disposable one ("PoC Test Actor") was created via `POST /create` to exercise
 the rest of the loop, then removed again via `DELETE /delete` once testing
@@ -438,119 +439,78 @@ under this restructuring — toggled "equipped" on William's real "Hammer",
 confirmed via `uiautomator` that the Inventory tab stayed selected, then
 toggled it back to leave his actor as found.
 
-## Phase 1.5d (keep HP/AC/Prof full size, only hide name + ability grid) — also verified live
+## Phase 1.5d (the collapsing header, corrected over four live rounds) — also verified live
 
-First attempt at this follow-up shrank the HP/AC/Prof boxes down into a
-persistent compact row while scrolled (a `compact` flag on
-`_HpCard`/`_AcCard`/`_StatCard`, sharing a `_StatRow` widget between the
-two sizes) — that surfaced a real bug (the shrunk HP card's -/+ buttons
-overflowed their row, since Flutter's `IconButton` enforces a Material
-minimum 48dp tap target regardless of `constraints`/`padding`, fixed by
-swapping to a plain `InkWell`+`Icon` for the compact variant), but turned
-out to be a misread of the actual request: the boxes should stay exactly
-as big as they always were, always pinned at the top — only the name/class
-line and ability score grid should hide on scroll.
+The collapsing header from 1.5c needed four more rounds of live
+correction before it matched what was actually being asked for — each
+round caught by testing on William's real sheet, not assumed correct from
+the code:
 
-Corrected by removing the `compact` flag entirely (dead code once nothing
-needed a second size) and moving the unmodified, full-size `_StatRow` into
-the `SliverAppBar`'s always-visible `bottom`, next to the `TabBar` — so
-HP/AC/Prof render exactly as they did before any of this collapsing-header
-work started, just permanently pinned instead of scrolling away with the
-name and ability grid. `_statRowHeight` (how much room the `bottom` needs
-to reserve for the full-size row) was measured live the same way as the
-rest of these constants — an initial guess of 98 overflowed by 5px
-on-device, corrected to 104.
+1. **HP/AC/Prof shouldn't shrink at all — misread, then corrected.** The
+   first version shrank HP/AC/Prof into a persistent compact row
+   alongside the collapsing name/ability grid (a `compact` flag shared
+   between `_HpCard`/`_AcCard`/`_StatCard`/`_StatRow`). That surfaced a
+   real bug — the shrunk HP card's -/+ buttons overflowed their row,
+   since Flutter's `IconButton` enforces a Material 48dp minimum tap
+   target regardless of `constraints`/`padding`, fixed by swapping to a
+   plain `InkWell`+`Icon` — but the whole approach was a misread: HP/AC/
+   Prof should stay exactly as big as they always were, always pinned,
+   with only the name/class line and ability grid hiding on scroll.
+   Corrected by removing the `compact` flag and moving the unmodified,
+   full-size `_StatRow` into the `SliverAppBar`'s always-visible `bottom`.
+2. **Actually, it should shrink — continuously, and sit above the
+   abilities.** Turned out static HP/AC/Prof wasn't right either: they
+   needed to sit *above* the ability grid (name → HP/AC/Prof →
+   abilities), stay full size only at the very top, and *continuously
+   shrink to about half height* while scrolling — not stay static. There
+   was also a real, separate bug in the same area: with HP/AC/Prof below
+   the ability grid, INT/WIS/CHA were getting visually cut off, because
+   `SliverAppBar.flexibleSpace.background` renders behind the app bar's
+   pinned parts and the height budgeted for name + ability grid was a bit
+   too small — the overflow rendered *behind* the opaque HP/AC/Prof +
+   `TabBar` strip, hiding it (the same "guessed a height, it was too
+   small" mistake as every previous round on this header, just showing up
+   as an overlap instead of a clip). `SliverAppBar`/`FlexibleSpaceBar`
+   can't do a *continuously* shrinking persistent element at all, so both
+   were replaced with a hand-written `SliverPersistentHeaderDelegate`
+   (`_CollapsingHeaderDelegate`): it reads `shrinkOffset` directly,
+   computes a collapse fraction `t`, a `_ClipToHeight` helper
+   (`SizedBox` + `ClipRect` + `OverflowBox`) clips the name row and
+   ability grid away as `t → 1`, and `_StatRow` gained a continuous
+   `scale` parameter (`lerpDouble(1.0, 0.5, t)`) driving its sizing
+   directly. `maxExtent`/`minExtent` are built algebraically from the
+   same per-piece height constants so the built content's height exactly
+   equals the sliver's current extent at every scroll position.
+3. **Legible text.** With `scale` driving box chrome and font sizes
+   together, text at full collapse was tiny and basically illegible even
+   though the boxes had comfortably enough room for something bigger.
+   Split into `scale` (box padding/margin, still shrinks to half) and a
+   new `textScale` (barely shrinks at all), so text stays close to full
+   size and legible regardless of box size.
+4. **Bigger, better-positioned -/+ icons.** The HP card's -/+ circles
+   still felt cramped against the number — too small, hugging the text
+   instead of sitting centered in the gap toward the card's edges. Added
+   a gentle `iconScale` (same pattern as `textScale`) and restructured the
+   icon/number/icon row into three `Expanded` cells so each icon centers
+   in its own cell. First attempt at that used `Flexible` (not `Expanded`)
+   for the number cell to keep it at natural size — but `Flexible`'s
+   *actual rendered* size, not its full flex share, is what `Row` uses to
+   position the next sibling, so the following icon collapsed inward
+   instead of reaching its true position. Fixed by making the number cell
+   `Expanded` too, with `Center` + `FittedBox` inside so the glyphs still
+   render at natural size while the cell correctly reserves its full
+   share for the icon after it.
 
-Verified live on William's real sheet: scrolling down hides the name and
-ability grid while HP/AC/Prof stay pinned at their original full size,
-unchanged, above the tab bar; scrolling up restores the full header
-exactly as before, with no overflow anywhere.
-
-## Phase 1.5e (HP/AC/Prof above the ability grid, and actually shrinking) — also verified live
-
-A third round on this same header, and the most specific correction yet:
-HP/AC/Prof needed to sit *above* the ability grid (name → HP/AC/Prof →
-abilities, not the other way around), stay full size only when fully
-scrolled to the top, and *continuously shrink to about half height* while
-scrolling down — the previous fix made them static, which (again) wasn't
-the ask. There was also a real, separate bug in the same area: with
-HP/AC/Prof below the ability grid, INT/WIS/CHA were getting visually cut
-off. Root cause: `SliverAppBar.flexibleSpace.background` renders behind
-the app bar's pinned parts (toolbar + `bottom`), and the height budgeted
-for name + ability grid was a bit too small — the overflow was rendering
-*behind* the always-on-top HP/AC/Prof + `TabBar` strip, hiding it, the
-same "guessed a height, it was too small" mistake as every previous round
-on this header, just manifesting as an overlap instead of a clip.
-
-`SliverAppBar`/`FlexibleSpaceBar` can't do a *continuously* shrinking
-persistent element at all — `flexibleSpace.title` only supports a
-fixed-size crossfade (and didn't reserve space correctly even for that,
-per the first attempt at this header), and `bottom` is a fixed
-`PreferredSize`, not scroll-aware. Replaced both with a hand-written
-`SliverPersistentHeaderDelegate` (`_CollapsingHeaderDelegate`), which gets
-`shrinkOffset` directly: computes a collapse fraction `t` from it, then a
-small `_ClipToHeight` helper (`SizedBox` + `ClipRect` + `OverflowBox`)
-clips the name row and ability grid away to nothing as `t → 1`, while
-`_StatRow` gained a continuous `scale` parameter
-(`lerpDouble(1.0, 0.5, t)`) driving its font sizes/padding/icon sizes
-directly, replacing the discrete `compact` bool from the earlier (wrong)
-attempt. `maxExtent`/`minExtent` are built algebraically from the same
-per-piece height constants so the built content's height exactly equals
-the sliver's current extent at every scroll position, with no slack to
-overflow.
-
-Verified live on William's real sheet: HP/AC/Prof now render above the
-ability grid; at rest, all 6 ability cards are fully visible (the
-INT/WIS/CHA clipping is gone); scrolling down hides the name and ability
-grid completely while HP/AC/Prof visibly shrink to about half height,
-staying fully interactive — round-tripped HP `9/9` → `8/9` → `9/9` using
-the shrunk -/+ buttons, located precisely via a cropped and upscaled
-screenshot rather than a guessed tap coordinate, since the shrunk targets
-are small; scrolling back up restores everything to full size exactly as
-before.
-
-## Phase 1.5f (legible text in the shrunk HP/AC/Prof boxes) — also verified live
-
-One more follow-up: the previous item's single `scale` factor drove both
-the box chrome (padding/margin/icon size) *and* the font sizes together,
-so at full collapse the text was tiny and basically illegible even though
-the boxes had comfortably enough room for something bigger. Split into two
-independent factors: `scale` keeps shrinking box padding/margin/icon size
-to half as before, while a new `textScale` (barely shrinking at all)
-drives font sizes almost independently — so text stays close to full size
-and legible even in the smallest boxes.
-
-Verified live on William's real sheet: at full collapse, all the HP/AC/
-Prof text is now clearly legible; confirmed via `uiautomator dump` that
-the HP card's bounds are pixel-identical to before this change — the
-boxes genuinely didn't grow, only the text inside them did.
-
-## Phase 1.5g (bigger, better-positioned HP -/+ icons) — also verified live
-
-Last follow-up on this header: the HP card's -/+ circles felt cramped
-right up against the number once scrolled — too small, and hugging the
-text instead of sitting centered in the space between the number and the
-card's edges. Fixed with a new `iconScale` (shrinks much less than the
-box itself, the same pattern as `textScale`) plus a layout change from a
-tight, centered cluster to three equal `Expanded` cells (icon | number |
-icon), each icon centered within its own cell — pushing both out toward
-the card edges instead of crowding the text.
-
-The first attempt at that layout change used `Flexible` (not `Expanded`)
-for the number cell, expecting it to stay at its natural size without
-stretching — it did, but `Flexible`'s *actual rendered* size (not its
-full flex share) is what `Row` uses to position the next sibling, so the
-following icon collapsed inward instead of landing at its true position;
-both icons ended up barely different from before. Fixed by making the
-number cell `Expanded` too, with `Center` + `FittedBox` inside so the
-glyphs still render at natural size while the cell itself correctly
-reserves its full share for the following icon's position.
-
-Verified live via a cropped/upscaled screenshot (the same technique used
-earlier to precisely locate the shrunk tap targets): icons are visibly
-bigger and sit symmetrically centered in the gap between the number and
-each side of the card; round-tripped HP `9/9` → `8/9` → `9/9` using the
-repositioned icons to confirm they're still correctly tappable.
+Final state, verified live on William's real sheet: HP/AC/Prof sit above
+the ability grid, full size at the top with all 6 ability cards fully
+visible (no clipping); scrolling down clips the name and ability grid
+away to nothing while HP/AC/Prof continuously shrink to about half
+height, staying legible and fully interactive — round-tripped HP
+`9/9` → `8/9` → `9/9` at both full and shrunk size, tap targets located
+precisely via cropped/upscaled screenshots since the shrunk ones are
+small; a small scroll-up from deep in a list (not just from the very top,
+thanks to `floating: true`) immediately starts restoring the header, and
+scrolling to the top restores it in full.
 
 ## Remaining before this is more than a PoC
 
