@@ -2,9 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../config/relay_config.dart';
+import '../models/relay_models.dart';
 import '../services/relay_client.dart';
 import '../widgets/dynamic_json_view.dart';
 import 'chat_screen.dart';
+
+class _SheetData {
+  final Map<String, dynamic> actor;
+  final List<ActiveEffectInfo> effects;
+  final String? effectsError;
+
+  _SheetData({required this.actor, required this.effects, required this.effectsError});
+}
 
 class ActorSheetScreen extends StatefulWidget {
   final String uuid;
@@ -18,7 +27,7 @@ class ActorSheetScreen extends StatefulWidget {
 
 class _ActorSheetScreenState extends State<ActorSheetScreen> {
   late final RelayClient _client;
-  Future<Map<String, dynamic>>? _future;
+  Future<_SheetData>? _future;
 
   @override
   void initState() {
@@ -29,8 +38,22 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
 
   void _load() {
     setState(() {
-      _future = _client.getEntity(widget.uuid);
+      _future = _loadAll();
     });
+  }
+
+  Future<_SheetData> _loadAll() async {
+    final actor = await _client.getEntity(widget.uuid);
+    // Conditions are a nice-to-have on top of the core sheet — don't let a
+    // missing effects:read scope on the API key take down the whole screen.
+    List<ActiveEffectInfo> effects = [];
+    String? effectsError;
+    try {
+      effects = await _client.getActiveEffects(widget.uuid);
+    } on RelayException catch (e) {
+      effectsError = e.message;
+    }
+    return _SheetData(actor: actor, effects: effects, effectsError: effectsError);
   }
 
   @override
@@ -93,9 +116,179 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
         ),
       );
     } on RelayException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      _showError(e.message);
     }
+  }
+
+  /// Long-press on a numeric leaf: quick -1/+1, or a custom amount, via the
+  /// relay's dedicated `/increase`/`/decrease` endpoints — same JSON [path]
+  /// the roll dialog uses, so this works for any numeric field on any
+  /// system (HP, spell slots, item quantity, currency, ...) identically.
+  Future<void> _openAdjustDialog(String path, num value) async {
+    final amountController = TextEditingController(text: '1');
+
+    final delta = await showDialog<num>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Aanpassen — $path'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Huidige waarde: $value', style: const TextStyle(color: Colors.grey)),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton.filledTonal(
+                  onPressed: () => Navigator.pop(context, -1),
+                  icon: const Icon(Icons.remove),
+                ),
+                const SizedBox(width: 16),
+                SizedBox(
+                  width: 90,
+                  child: TextField(
+                    controller: amountController,
+                    keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
+                    textAlign: TextAlign.center,
+                    decoration: const InputDecoration(labelText: 'Bedrag', border: OutlineInputBorder()),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                IconButton.filledTonal(
+                  onPressed: () => Navigator.pop(context, 1),
+                  icon: const Icon(Icons.add),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuleer')),
+          FilledButton(
+            onPressed: () {
+              final custom = num.tryParse(amountController.text.trim().replaceAll(',', '.'));
+              Navigator.pop(context, custom);
+            },
+            child: const Text('Toepassen'),
+          ),
+        ],
+      ),
+    );
+
+    if (delta == null || delta == 0 || !mounted) return;
+
+    try {
+      await _client.adjustAttribute(widget.uuid, path, delta);
+      _load();
+    } on RelayException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  /// Tap on a string/bool leaf: bools toggle straight away, strings open a
+  /// small edit dialog. Both go through `PUT /update` with the same JSON
+  /// [path] — no per-field knowledge needed.
+  Future<void> _onEditLeaf(String path, dynamic currentValue) async {
+    if (currentValue is bool) {
+      try {
+        await _client.updateField(widget.uuid, path, !currentValue);
+        _load();
+      } on RelayException catch (e) {
+        _showError(e.message);
+      }
+      return;
+    }
+
+    final controller = TextEditingController(text: currentValue?.toString() ?? '');
+    final newText = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Bewerken — $path'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: null,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuleer')),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Opslaan'),
+          ),
+        ],
+      ),
+    );
+
+    if (newText == null || !mounted) return;
+
+    try {
+      await _client.updateField(widget.uuid, path, newText);
+      _load();
+    } on RelayException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _openAddConditionDialog() async {
+    List<EffectDefinition> options;
+    try {
+      options = await _client.getAvailableEffects();
+    } on RelayException catch (e) {
+      _showError(e.message);
+      return;
+    }
+    if (!mounted) return;
+
+    final chosen = await showDialog<EffectDefinition>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Conditie toevoegen'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: options.isEmpty
+              ? const Center(child: Text('Geen condities beschikbaar voor dit systeem.'))
+              : ListView.builder(
+                  itemCount: options.length,
+                  itemBuilder: (context, i) {
+                    final o = options[i];
+                    return ListTile(
+                      leading: o.icon != null ? const Icon(Icons.shield_outlined) : null,
+                      title: Text(o.name),
+                      onTap: () => Navigator.pop(context, o),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuleer')),
+        ],
+      ),
+    );
+
+    if (chosen == null || !mounted) return;
+
+    try {
+      await _client.addEffect(widget.uuid, chosen.id);
+      _load();
+    } on RelayException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  Future<void> _removeCondition(ActiveEffectInfo effect) async {
+    try {
+      await _client.removeEffect(widget.uuid, effect.id);
+      _load();
+    } on RelayException catch (e) {
+      _showError(e.message);
+    }
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -115,7 +308,7 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
       ),
       body: RefreshIndicator(
         onRefresh: () async => _load(),
-        child: FutureBuilder<Map<String, dynamic>>(
+        child: FutureBuilder<_SheetData>(
           future: _future,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
@@ -137,28 +330,84 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
                 ],
               );
             }
-            final actor = snapshot.data!;
+            final data = snapshot.data!;
             return ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
               children: [
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Text(
-                    'Tik op een getal om er een roll van te maken. '
-                    'Dit is de volledige, onbewerkte actor-JSON — geen system-specifieke velden.',
+                    'Tik op een getal voor een roll, houd ingedrukt om aan te passen. '
+                    'Tik op tekst/aan-uit om te bewerken. Volledige, onbewerkte actor-JSON — '
+                    'geen system-specifieke velden.',
                     style: TextStyle(color: Colors.grey[600], fontSize: 12),
                   ),
                 ),
+                _ConditionsRow(
+                  effects: data.effects,
+                  error: data.effectsError,
+                  onAdd: _openAddConditionDialog,
+                  onRemove: _removeCondition,
+                ),
                 DynamicJsonView(
-                  value: actor,
+                  value: data.actor,
                   path: '',
                   label: widget.name,
                   onTapNumber: _openRollDialog,
+                  onLongPressNumber: _openAdjustDialog,
+                  onEditLeaf: _onEditLeaf,
                 ),
               ],
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+class _ConditionsRow extends StatelessWidget {
+  final List<ActiveEffectInfo> effects;
+  final String? error;
+  final VoidCallback onAdd;
+  final void Function(ActiveEffectInfo) onRemove;
+
+  const _ConditionsRow({
+    required this.effects,
+    required this.error,
+    required this.onAdd,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Condities', style: Theme.of(context).textTheme.labelLarge),
+          const SizedBox(height: 6),
+          if (error != null)
+            Text(error!, style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 12))
+          else
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final effect in effects)
+                  Chip(
+                    label: Text(effect.name),
+                    onDeleted: () => onRemove(effect),
+                  ),
+                ActionChip(
+                  avatar: const Icon(Icons.add, size: 16),
+                  label: const Text('Toevoegen'),
+                  onPressed: onAdd,
+                ),
+              ],
+            ),
+        ],
       ),
     );
   }

@@ -1,14 +1,22 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Holds the relay connection settings (URL, API key, chosen Foundry world)
-/// and persists them locally. No auth/user-management beyond this — per the
-/// PoC brief, the API key living in local storage is enough for now.
+/// and persists them locally. No auth/user-management beyond this — a
+/// single device-local API key is enough for now.
+///
+/// The API key specifically lives in `flutter_secure_storage` (Android
+/// Keystore-backed), not `shared_preferences` — everything else here
+/// (`baseUrl`, `clientId`, `clientLabel`) is non-secret and stays in plain
+/// prefs.
 class RelayConfig extends ChangeNotifier {
   static const _keyBaseUrl = 'relay_base_url';
   static const _keyApiKey = 'relay_api_key';
   static const _keyClientId = 'relay_client_id';
   static const _keyClientLabel = 'relay_client_label';
+
+  static const _secureStorage = FlutterSecureStorage();
 
   String baseUrl = '';
   String apiKey = '';
@@ -23,9 +31,22 @@ class RelayConfig extends ChangeNotifier {
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     baseUrl = prefs.getString(_keyBaseUrl) ?? '';
-    apiKey = prefs.getString(_keyApiKey) ?? '';
     clientId = prefs.getString(_keyClientId);
     clientLabel = prefs.getString(_keyClientLabel);
+
+    apiKey = await _secureStorage.read(key: _keyApiKey) ?? '';
+    // One-time migration: earlier builds stored the key in plain
+    // shared_preferences. Move it over so existing installs don't have to
+    // re-enter it, then scrub the plaintext copy.
+    if (apiKey.isEmpty) {
+      final legacyKey = prefs.getString(_keyApiKey);
+      if (legacyKey != null && legacyKey.isNotEmpty) {
+        apiKey = legacyKey;
+        await _secureStorage.write(key: _keyApiKey, value: legacyKey);
+        await prefs.remove(_keyApiKey);
+      }
+    }
+
     _loaded = true;
     notifyListeners();
   }
@@ -35,7 +56,7 @@ class RelayConfig extends ChangeNotifier {
     this.baseUrl = baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
     this.apiKey = apiKey.trim();
     await prefs.setString(_keyBaseUrl, this.baseUrl);
-    await prefs.setString(_keyApiKey, this.apiKey);
+    await _secureStorage.write(key: _keyApiKey, value: this.apiKey);
     notifyListeners();
   }
 
@@ -51,9 +72,9 @@ class RelayConfig extends ChangeNotifier {
   Future<void> clear() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyBaseUrl);
-    await prefs.remove(_keyApiKey);
     await prefs.remove(_keyClientId);
     await prefs.remove(_keyClientLabel);
+    await _secureStorage.delete(key: _keyApiKey);
     baseUrl = '';
     apiKey = '';
     clientId = null;

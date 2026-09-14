@@ -6,14 +6,18 @@ import 'package:flutter/material.dart';
 /// of this PoC: it must work identically for a D&D 5e actor, a Pathfinder
 /// actor, or anything else Foundry can store.
 ///
-/// Every numeric leaf is tappable — [onTapNumber] is called with its JSON
-/// path (e.g. `system.abilities.str.value`) and value, so the caller can
-/// turn any stat into a roll without this widget knowing what a "stat" is.
+/// Every numeric leaf is tappable ([onTapNumber], turns it into a roll) and
+/// long-press-able ([onLongPressNumber], opens a +/- adjust dialog) — same
+/// JSON path either way, so the caller decides what a "stat" means without
+/// this widget knowing. Boolean and string leaves are tappable via
+/// [onEditLeaf] to edit them in place.
 class DynamicJsonView extends StatelessWidget {
   final dynamic value;
   final String path;
   final String label;
   final void Function(String path, num value) onTapNumber;
+  final void Function(String path, num value) onLongPressNumber;
+  final void Function(String path, dynamic currentValue) onEditLeaf;
   final int depth;
 
   const DynamicJsonView({
@@ -22,6 +26,8 @@ class DynamicJsonView extends StatelessWidget {
     required this.path,
     required this.label,
     required this.onTapNumber,
+    required this.onLongPressNumber,
+    required this.onEditLeaf,
     this.depth = 0,
   });
 
@@ -35,6 +41,8 @@ class DynamicJsonView extends StatelessWidget {
         path: path,
         entries: map,
         onTapNumber: onTapNumber,
+        onLongPressNumber: onLongPressNumber,
+        onEditLeaf: onEditLeaf,
         depth: depth,
       );
     }
@@ -46,6 +54,8 @@ class DynamicJsonView extends StatelessWidget {
         path: path,
         items: list,
         onTapNumber: onTapNumber,
+        onLongPressNumber: onLongPressNumber,
+        onEditLeaf: onEditLeaf,
         depth: depth,
       );
     }
@@ -54,17 +64,27 @@ class DynamicJsonView extends StatelessWidget {
         label: label,
         value: value as num,
         onTap: () => onTapNumber(path, value as num),
+        onLongPress: () => onLongPressNumber(path, value as num),
       );
     }
     if (value is bool) {
-      return _LeafTile(label: label, valueText: value.toString(), icon: Icons.toggle_on_outlined);
+      return _LeafTile(
+        label: label,
+        valueText: value.toString(),
+        icon: Icons.toggle_on_outlined,
+        onTap: () => onEditLeaf(path, value),
+      );
     }
     if (value == null) {
       return _LeafTile(label: label, valueText: '—', muted: true);
     }
     // String (or anything else JSON can hold).
     final text = value.toString();
-    return _LeafTile(label: label, valueText: text.isEmpty ? '""' : text);
+    return _LeafTile(
+      label: label,
+      valueText: text.isEmpty ? '""' : text,
+      onTap: () => onEditLeaf(path, value),
+    );
   }
 }
 
@@ -73,6 +93,8 @@ class _MapNode extends StatelessWidget {
   final String path;
   final Map<String, dynamic> entries;
   final void Function(String path, num value) onTapNumber;
+  final void Function(String path, num value) onLongPressNumber;
+  final void Function(String path, dynamic currentValue) onEditLeaf;
   final int depth;
 
   const _MapNode({
@@ -80,6 +102,8 @@ class _MapNode extends StatelessWidget {
     required this.path,
     required this.entries,
     required this.onTapNumber,
+    required this.onLongPressNumber,
+    required this.onEditLeaf,
     required this.depth,
   });
 
@@ -105,6 +129,8 @@ class _MapNode extends StatelessWidget {
                     path: path.isEmpty ? e.key : '$path.${e.key}',
                     label: e.key,
                     onTapNumber: onTapNumber,
+                    onLongPressNumber: onLongPressNumber,
+                    onEditLeaf: onEditLeaf,
                     depth: depth + 1,
                   ))
               .toList(),
@@ -119,6 +145,8 @@ class _ListNode extends StatelessWidget {
   final String path;
   final List items;
   final void Function(String path, num value) onTapNumber;
+  final void Function(String path, num value) onLongPressNumber;
+  final void Function(String path, dynamic currentValue) onEditLeaf;
   final int depth;
 
   const _ListNode({
@@ -126,6 +154,8 @@ class _ListNode extends StatelessWidget {
     required this.path,
     required this.items,
     required this.onTapNumber,
+    required this.onLongPressNumber,
+    required this.onEditLeaf,
     required this.depth,
   });
 
@@ -150,6 +180,8 @@ class _ListNode extends StatelessWidget {
                 path: '$path[$i]',
                 label: _itemLabel(items[i], i),
                 onTapNumber: onTapNumber,
+                onLongPressNumber: onLongPressNumber,
+                onEditLeaf: onEditLeaf,
                 depth: depth + 1,
               ),
           ],
@@ -168,14 +200,21 @@ class _NumberTile extends StatelessWidget {
   final String label;
   final num value;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
-  const _NumberTile({required this.label, required this.value, required this.onTap});
+  const _NumberTile({
+    required this.label,
+    required this.value,
+    required this.onTap,
+    required this.onLongPress,
+  });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         child: Row(
@@ -214,35 +253,48 @@ class _LeafTile extends StatelessWidget {
   final String valueText;
   final bool muted;
   final IconData? icon;
+  final VoidCallback? onTap;
 
-  const _LeafTile({required this.label, required this.valueText, this.muted = false, this.icon});
+  const _LeafTile({
+    required this.label,
+    required this.valueText,
+    this.muted = false,
+    this.icon,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 2,
-            child: Text(label, style: const TextStyle(fontSize: 13)),
-          ),
-          if (icon != null) Icon(icon, size: 15, color: Colors.grey),
-          Expanded(
-            flex: 3,
-            child: Text(
-              valueText,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 13,
-                color: muted ? Colors.grey : null,
-                fontStyle: muted ? FontStyle.italic : FontStyle.normal,
-              ),
+    final row = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          flex: 2,
+          child: Text(label, style: const TextStyle(fontSize: 13)),
+        ),
+        if (icon != null) Icon(icon, size: 15, color: Colors.grey),
+        Expanded(
+          flex: 3,
+          child: Text(
+            valueText,
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              fontSize: 13,
+              color: muted ? Colors.grey : null,
+              fontStyle: muted ? FontStyle.italic : FontStyle.normal,
             ),
           ),
+        ),
+        if (onTap != null) ...[
+          const SizedBox(width: 4),
+          const Icon(Icons.edit_outlined, size: 14, color: Colors.grey),
         ],
-      ),
+      ],
     );
+    final padded = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      child: row,
+    );
+    return onTap == null ? padded : InkWell(onTap: onTap, child: padded);
   }
 }

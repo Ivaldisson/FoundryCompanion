@@ -22,6 +22,12 @@ Talks to a self-hosted
   opens a dialog pre-filled with a formula and the JSON path as flavor text,
   then `POST /roll` with `createChatMessage: true` so the result lands in
   Foundry's own chat log.
+- **Writable sheet** — long-press any numeric leaf for a +/- adjust dialog
+  (`POST /increase`/`/decrease`); tap any string/bool leaf to edit it in
+  place (`PUT /update`). A **Condities** row above the tree shows active
+  effects and lets you add/remove them (`GET /effects`, `GET /effects/list`,
+  `POST`/`DELETE /effects`). Same generic mechanism covers HP, resources,
+  spell slots, and item fields — see "Why generic leaf-editing" below.
 - **Live chat** (`lib/screens/chat_screen.dart`) — loads recent history via
   `GET /chat`, then streams new messages live.
 
@@ -45,6 +51,34 @@ in `lib/services/relay_client.dart` parses the SSE stream manually over Dio's
 which the plain browser `EventSource` API can't do — same reason the relay's
 own test example uses a custom-fetch `EventSource` polyfill instead).
 
+## Why generic leaf-editing instead of `/sheet` or `/dnd5e/*`
+
+The natural-sounding plan for a "writable sheet" was to switch to `/sheet`
+for a richer, computed data source. Verified live before writing any code:
+`GET /sheet` is not JSON — it returns a PNG/JPEG **screenshot** of the
+rendered Foundry sheet (`docs/md/api/sheet.md` in the relay repo). And the
+raw `/get` document this app already uses has no derived values either
+(confirmed live: a probe actor's `system.abilities.str` has `value`/
+`proficient`/`max`/`bonuses` but no computed `mod`). There's no
+system-agnostic JSON endpoint anywhere in the relay that exposes computed
+stats for any game system generically.
+
+The relay *does* have a `/dnd5e/*` router with dedicated endpoints for
+things like spell slot consumption and inventory equip — using those would
+have been the easy path to a "nicer" inventory/spellcasting UI, but only
+for D&D 5e worlds. That's exactly the coupling this whole PoC exists to
+avoid, so writes go through the generic `/update`, `/increase`, `/decrease`,
+and `/effects*` routes instead — all system-agnostic, none of them assume
+anything about what fields a "character" has.
+
+Concretely: `POST /increase`/`/decrease` take an `attribute` **dot-path
+string** (e.g. `system.attributes.hp.value`) — exactly the `path`
+`DynamicJsonView` already computes per leaf while rendering. So the same
+long-press mechanism that adjusts HP also adjusts a spell slot or an item's
+quantity, with zero field-name-specific code — "inventory" and
+"spellcasting tracker" fall out of "writable sheet" for free, since items
+and spell slots are just more leaves in the same tree.
+
 ## Other things confirmed from source rather than assumed
 
 - No `/api` prefix — routes are mounted at the server root
@@ -60,8 +94,9 @@ own test example uses a custom-fetch `EventSource` polyfill instead).
 
 ## Out of scope for this PoC
 
-Auth/user management beyond the one API key, inventory/spell trackers, GM
-tools, push notifications, offline caching.
+Auth/user management beyond the one API key (now in secure storage, see
+below), dedicated Inventory/Spellcasting screens, GM tools, push
+notifications, offline caching.
 
 ## Running it
 
@@ -154,9 +189,37 @@ curl:
    appeared in the app automatically, connection status staying "live"
    throughout.
 
+## Phase 1 (writable sheet) — also verified live
+
+Same pattern as above: a disposable "Phase1 Test Actor" was created via
+`POST /create`, driven through the rebuilt app via `adb`/`uiautomator`, and
+deleted again afterward. Each UI action was independently confirmed on the
+relay side too, not just trusted from the app's own screen:
+
+- **+/- adjust**: long-pressed `system.attributes.hp.value` (10), applied
+  -1 → app showed 9 → `GET /get` on the relay confirmed `hp.value: 9`.
+- **String edit**: edited `name` via the dialog → saved → `GET /get`
+  confirmed the new value.
+- **Bool toggle**: tapped `system.attributes.inspiration` (`false`) → `GET
+  /get` confirmed `true`.
+- **Conditions**: added "Half Cover" from the `/effects/list`-driven picker
+  → `GET /effects` showed it (`statuses: ["coverHalf"]`) → removed it via
+  the chip's ✕ → `GET /effects` confirmed the list was empty again.
+- **Secure storage migration**: the already-configured test phone (from
+  the earlier PoC session, API key in plain `shared_preferences`) opened
+  straight to the actor list after installing the rebuilt app — no
+  re-entering the key — confirming `RelayConfig`'s migration to
+  `flutter_secure_storage` ran correctly against a real pre-existing install.
+
+Not yet live-tested: item fields (`items[i].system.quantity`/`equipped`)
+and prepared-spell slots, since the probe actor had neither — see
+`TODO.md`.
+
 ## Remaining before this is more than a PoC
 
-Nothing acceptance-critical is outstanding. Worth doing next: decide
-whether to report the SSE fixture mismatch upstream to ThreeHats, and the
-out-of-scope items above (auth, offline caching, GM dashboard) once this
-grows past PoC scope. See `TODO.md` for the fuller roadmap.
+Nothing acceptance-critical is outstanding. Worth doing next: live-test
+item/spell-slot editing against a populated actor, decide whether to
+report the SSE fixture mismatch upstream to ThreeHats, and the out-of-scope
+items above (dedicated GM tools, push notifications, offline caching, real
+multi-user auth) once this grows past PoC scope. See `TODO.md` for the
+fuller roadmap.

@@ -163,3 +163,46 @@ class ChatSseEvent {
 
   ChatSseEvent({required this.type, required this.data});
 }
+
+/// One entry from `GET /effects/list` — a status condition this world's
+/// game system knows about (e.g. "poisoned", "prone"). System-driven, not
+/// hardcoded here, so this list differs per world/system.
+class EffectDefinition {
+  final String id;
+  final String name;
+  final String? icon;
+
+  EffectDefinition({required this.id, required this.name, required this.icon});
+
+  factory EffectDefinition.fromJson(Map<String, dynamic> json) {
+    return EffectDefinition(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? json['id'] as String? ?? '',
+      icon: json['icon'] as String?,
+    );
+  }
+}
+
+/// One ActiveEffect currently applied to an actor, from `GET /effects`.
+class ActiveEffectInfo {
+  final String id;
+  final String name;
+  final String? icon;
+  final List<String> statuses;
+
+  ActiveEffectInfo({
+    required this.id,
+    required this.name,
+    required this.icon,
+    required this.statuses,
+  });
+
+  factory ActiveEffectInfo.fromJson(Map<String, dynamic> json) {
+    return ActiveEffectInfo(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      icon: json['icon'] as String?,
+      statuses: ((json['statuses'] as List?) ?? []).map((e) => e.toString()).toList(),
+    );
+  }
+}

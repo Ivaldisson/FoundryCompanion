@@ -6,18 +6,51 @@ The PoC proves the core loop (view actor, roll, live chat). To become something
 actually usable day-to-day at the table, roughly in this order:
 
 ### Phase 1 — Solidify the single-player core
-- [ ] Switch from the raw `/get` document to the `/sheet` endpoint (Foundry's own
+- [x] ~~Switch from the raw `/get` document to the `/sheet` endpoint (Foundry's own
       computed values) as the primary data source — the raw document is fine for
       proving the round-trip, but doesn't reflect derived stats (modifiers, active
-      effects) the way a real sheet needs to.
-- [ ] Make the sheet **writable**, not just viewable — at minimum: HP, resource/slot
+      effects) the way a real sheet needs to.~~ — dropped, premise was wrong.
+  - Verified live: `GET /sheet` is not a JSON endpoint — it returns a PNG/JPEG
+    screenshot of the rendered sheet (`docs/md/api/sheet.md` in the relay repo).
+    And the raw `/get` document has no derived/computed values at all (confirmed
+    live: a probe actor's `abilities.str` has no `mod`). There is no
+    system-agnostic JSON endpoint anywhere in the relay's route surface that
+    exposes computed stats. See the next item for what actually covers this gap.
+- [x] ~~Make the sheet **writable**, not just viewable — at minimum: HP, resource/slot
       counters, and toggling conditions. This is the single biggest gap between "PoC"
-      and "usable at the table."
-- [ ] Inventory: list items, equip/unequip, use/consume — reuses the same dynamic
-      rendering approach as the sheet.
-- [ ] Spellcasting/resource tracker: slots and charges, decrement on cast/use.
-- [ ] Secure the API key in `flutter_secure_storage` instead of a plain config file
-      (relevant now that this becomes a real app people install, not just a dev PoC).
+      and "usable at the table."~~ — done, generically.
+  - Extended `DynamicJsonView`/`ActorSheetScreen` instead of building a
+    dedicated editor: long-press any numeric leaf → +/- dialog → `POST
+    /increase`/`/decrease` (same JSON path the roll dialog already uses); tap
+    any string/bool leaf → edit dialog / instant toggle → `PUT /update`
+    (Foundry's native flattened dot-key update, confirmed live). New
+    "Condities" row above the tree: chips from `GET /effects`, add via a
+    picker over `GET /effects/list`, remove via `DELETE /effects`. All fully
+    system-agnostic — none of the relay's dnd5e-specific `/dnd5e/*` routes are
+    used. Verified live end-to-end (HP 10→9, a string field edit, a bool
+    toggle, and add/remove of a "Half Cover" condition), each confirmed
+    independently via `GET /get`/`GET /effects` on the relay, not just the app UI.
+- [x] ~~Inventory: list items, equip/unequip, use/consume — reuses the same dynamic
+      rendering approach as the sheet.~~ — covered for free by the item above.
+  - `items[]` was already rendered generically by `DynamicJsonView`; the new
+    leaf-editing mechanism makes `items[i].system.quantity`/`equipped`/etc.
+    editable the same way as any other field, with no inventory-specific code.
+    Not separately live-tested against a real item (the probe actor had no
+    items) — worth a quick pass next time there's a populated actor to test.
+- [x] ~~Spellcasting/resource tracker: slots and charges, decrement on cast/use.~~ —
+      covered for free by the same mechanism.
+  - `system.spells.spell1-9/pact` and `system.resources.*` are just more
+    numeric leaves — the same long-press +/- adjust covers them. Not
+    separately live-tested (the probe actor was a fresh level-1 character
+    with no spells prepared); worth a quick pass against a caster.
+- [x] ~~Secure the API key in `flutter_secure_storage` instead of a plain config file
+      (relevant now that this becomes a real app people install, not just a dev PoC).~~ — done.
+  - `RelayConfig` now stores/reads `apiKey` via `flutter_secure_storage`
+    (Android Keystore-backed); `baseUrl`/`clientId`/`clientLabel` stay in
+    `shared_preferences` since they aren't secrets. One-time migration on
+    `load()` moves any pre-existing plaintext key over and scrubs it from
+    prefs — verified live: the already-configured test phone opened straight
+    to the actor list on the rebuilt app with no re-entry of the key needed.
 
 ### Phase 2 — Player-facing parity with D&D Beyond
 - [ ] Rest handling: short/long rest actions that trigger the right resource resets.
@@ -60,8 +93,11 @@ actually usable day-to-day at the table, roughly in this order:
 
 - [x] ~~Decide what to do with the "PoC Test Actor" left in the test world (created via `POST /create` to have something to point the app at) — keep it for further manual testing, or have it deleted.~~ — deleted.
   - Removed via `DELETE /delete?uuid=Actor.29yqdOgjmpHlksRA` on the relay; confirmed gone via `GET /search?filter=documentType:Actor` (no `WorldEntity` results left, only compendium entries). The test world now has no actors — point the app at a real one, or create a new disposable test actor the same way if needed again.
+- [x] ~~Clean up the "Phase1 Test Actor" created to live-verify the writable-sheet work~~ — deleted.
+  - Same pattern as above: created via `POST /create`, used to verify the long-press adjust/edit-leaf/conditions mechanism end-to-end on-device, removed via `DELETE /delete?uuid=Actor.skQGXYD99SldXJtF` once done. Test world has no actors again.
 - [ ] Consider reporting the SSE fixture mismatch upstream to ThreeHats (`foundryvtt-rest-api-relay`) — see Bugs below.
-- [ ] Explore the relay endpoints not yet touched by the app: `GET /rolls`/`GET /lastroll` (roll history), `GET /sheet` (Foundry's own computed sheet, vs. the raw `/get` document this PoC uses — could be a nicer source for a future non-raw sheet view), `/structure` + folders (for actor organization once there's more than one).
+- [ ] Explore the relay endpoints not yet touched by the app: `GET /rolls`/`GET /lastroll` (roll history), `/structure` + folders (for actor organization once there's more than one). (`GET /sheet` was explored — it's a PNG/JPEG screenshot, not JSON; see Phase 1 above. Could still be worth showing as a supplementary visual, but it's not a data source.)
+- [ ] Live-test the generic leaf-editing mechanism (Phase 1) against an actor that actually has items and prepared spells — the probe actor used to verify it was a fresh level-1 character with neither, so `items[i].system.quantity/equipped` and `system.spells.spell1-9` edits are implemented but not independently confirmed live yet.
 - [ ] From the brief's own "onthouden voor later" list, once this grows past PoC scope: auth layer for multiple players, offline-first caching, GM dashboard (initiative tracker, NPC lookup, player status).
 - [ ] Get the relay reachable externally via the planned Cloudflare Tunnel (`wss://foundry-relay.shakycomma.org`) — needed before testing the app off the home network. When that happens, revisit `android:usesCleartextTraffic="true"` in `android/app/src/main/AndroidManifest.xml`, since the tunnel would be TLS.
 

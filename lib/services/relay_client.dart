@@ -26,6 +26,11 @@ class RelayException implements Exception {
 ///  - "Live chat" is Server-Sent Events on `GET /chat/subscribe`, not a
 ///    client-facing WebSocket — the WebSocket in this system only connects
 ///    the Foundry module to the relay, not this app to the relay.
+///  - Writes ([updateField], [adjustAttribute], effect toggling) deliberately
+///    use the generic `/update`, `/increase`, `/decrease`, `/effects*`
+///    routes and never the D&D-5e-specific `/dnd5e/*` router the relay also
+///    exposes — those would work for this test world but break the whole
+///    point of a system-agnostic renderer for anything else.
 class RelayClient {
   final RelayConfig config;
   final Dio _dio;
@@ -132,6 +137,106 @@ class RelayClient {
         throw RelayException('Relay gaf geen rollresultaat terug.');
       }
       return RollInfo.fromJson(roll);
+    } on DioException catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  /// Patches a single field on an entity using Foundry's native flattened
+  /// dot-notation update keys (e.g. `system.attributes.hp.value`) — standard
+  /// `Document#update()` behavior in Foundry core, not something the relay
+  /// special-cases. Works for any field at any path, on any system, which is
+  /// what lets the dynamic sheet stay generic instead of needing per-system
+  /// edit screens.
+  Future<void> updateField(String uuid, String path, dynamic value) async {
+    try {
+      final res = await _dio.put(
+        '/update',
+        queryParameters: {'clientId': config.clientId, 'uuid': uuid},
+        data: {
+          'data': {path: value},
+        },
+      );
+      _requireData(res);
+    } on DioException catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  /// Increments or decrements a numeric field by [delta] via the relay's
+  /// dedicated `/increase`/`/decrease` endpoints. [attribute] is the same
+  /// dot-path `DynamicJsonView` already computes per numeric leaf, so this
+  /// covers HP, resources, spell slots, item quantities, etc. identically
+  /// without any system-specific code here.
+  Future<num?> adjustAttribute(String uuid, String attribute, num delta) async {
+    final endpoint = delta >= 0 ? '/increase' : '/decrease';
+    try {
+      final res = await _dio.post(
+        endpoint,
+        queryParameters: {'clientId': config.clientId, 'uuid': uuid},
+        data: {'attribute': attribute, 'amount': delta.abs()},
+      );
+      final body = _requireData(res);
+      final results = body['results'] as List?;
+      if (results != null && results.isNotEmpty) {
+        return (results.first as Map<String, dynamic>)['newValue'] as num?;
+      }
+      return null;
+    } on DioException catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  /// Status conditions this world's game system knows about (e.g.
+  /// "poisoned", "prone") — driven entirely by `GET /effects/list`, so this
+  /// works for whatever system the connected world runs, not just dnd5e.
+  Future<List<EffectDefinition>> getAvailableEffects() async {
+    try {
+      final res = await _dio.get('/effects/list', queryParameters: {'clientId': config.clientId});
+      final body = _requireData(res);
+      final data = body['data'] as Map<String, dynamic>?;
+      return ((data?['effects'] as List?) ?? [])
+          .map((e) => EffectDefinition.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } on DioException catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  Future<List<ActiveEffectInfo>> getActiveEffects(String uuid) async {
+    try {
+      final res = await _dio.get('/effects', queryParameters: {'clientId': config.clientId, 'uuid': uuid});
+      final body = _requireData(res);
+      final data = body['data'] as Map<String, dynamic>?;
+      return ((data?['effects'] as List?) ?? [])
+          .map((e) => ActiveEffectInfo.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } on DioException catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  Future<void> addEffect(String uuid, String statusId) async {
+    try {
+      final res = await _dio.post(
+        '/effects',
+        queryParameters: {'clientId': config.clientId},
+        data: {'uuid': uuid, 'statusId': statusId},
+      );
+      _requireData(res);
+    } on DioException catch (e) {
+      _rethrow(e);
+    }
+  }
+
+  Future<void> removeEffect(String uuid, String effectId) async {
+    try {
+      final res = await _dio.delete(
+        '/effects',
+        queryParameters: {'clientId': config.clientId},
+        data: {'uuid': uuid, 'effectId': effectId},
+      );
+      _requireData(res);
     } on DioException catch (e) {
       _rethrow(e);
     }
