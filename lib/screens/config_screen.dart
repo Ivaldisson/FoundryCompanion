@@ -50,12 +50,12 @@ class _ConfigScreenState extends State<ConfigScreen> {
       final clients = await client.getClients();
       setState(() => _clients = clients);
       if (clients.isEmpty) {
-        setState(() => _error = 'Verbonden, maar geen Foundry-werelden gekoppeld aan deze API-key.');
+        setState(() => _error = 'Connected, but no Foundry worlds are linked to this API key.');
       }
     } on RelayException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {
-      setState(() => _error = 'Onverwachte fout: $e');
+      setState(() => _error = 'Unexpected error: $e');
     } finally {
       client.dispose();
       if (mounted) setState(() => _testing = false);
@@ -79,15 +79,15 @@ class _ConfigScreenState extends State<ConfigScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
-            'Verbind met je zelf-gehoste foundryvtt-rest-api-relay. '
-            'URL en API-key blijven alleen lokaal op dit toestel opgeslagen.',
+            'Connect to your self-hosted foundryvtt-rest-api-relay. '
+            'The URL and API key stay stored locally on this device only.',
             style: TextStyle(color: Colors.grey),
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _urlController,
             decoration: const InputDecoration(
-              labelText: 'Relay-URL',
+              labelText: 'Relay URL',
               hintText: 'http://192.168.178.19:3010',
               border: OutlineInputBorder(),
             ),
@@ -97,7 +97,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
           TextField(
             controller: _keyController,
             decoration: const InputDecoration(
-              labelText: 'API-key',
+              labelText: 'API key',
               border: OutlineInputBorder(),
             ),
             obscureText: true,
@@ -109,7 +109,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                 ? const SizedBox(
                     width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.wifi_tethering),
-            label: const Text('Test verbinding & haal werelden op'),
+            label: const Text('Test connection & fetch worlds'),
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
@@ -117,7 +117,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
           ],
           if (_clients.isNotEmpty) ...[
             const SizedBox(height: 20),
-            const Text('Kies een wereld:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text('Choose a world:', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             for (final c in _clients)
               Card(

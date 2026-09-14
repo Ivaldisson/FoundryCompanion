@@ -45,7 +45,7 @@ class _ActorPickerScreenState extends State<ActorPickerScreen> {
         title: Text(config.clientLabel ?? 'Actors'),
         actions: [
           IconButton(
-            tooltip: 'Verbinding wijzigen',
+            tooltip: 'Change connection',
             icon: const Icon(Icons.settings),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ConfigScreen()),
@@ -78,7 +78,7 @@ class _ActorPickerScreenState extends State<ActorPickerScreen> {
             }
             final actors = snapshot.data ?? [];
             if (actors.isEmpty) {
-              return const Center(child: Text('Geen actors gevonden in deze wereld.'));
+              return const Center(child: Text('No actors found in this world.'));
             }
             return ListView.separated(
               itemCount: actors.length,

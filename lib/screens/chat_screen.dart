@@ -132,7 +132,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Chatlog (live)'),
+        title: const Text('Chat log (live)'),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -156,14 +156,14 @@ class _ChatScreenState extends State<ChatScreen> {
               padding: const EdgeInsets.all(8),
               child: Row(
                 children: [
-                  const Expanded(child: Text('Live-verbinding verbroken.')),
-                  TextButton(onPressed: _subscribe, child: const Text('Opnieuw verbinden')),
+                  const Expanded(child: Text('Live connection lost.')),
+                  TextButton(onPressed: _subscribe, child: const Text('Reconnect')),
                 ],
               ),
             ),
           Expanded(
             child: _messages.isEmpty
-                ? const Center(child: Text('Nog geen chatberichten.'))
+                ? const Center(child: Text('No chat messages yet.'))
                 : ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.all(12),
@@ -178,7 +178,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Widget _statusChip() {
     final (color, label) = switch (_status) {
-      _LiveStatus.connecting => (Colors.orange, 'verbinden…'),
+      _LiveStatus.connecting => (Colors.orange, 'connecting…'),
       _LiveStatus.live => (Colors.green, 'live'),
       _LiveStatus.disconnected => (Colors.red, 'offline'),
     };
@@ -209,7 +209,7 @@ class _ChatBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              message.speakerName.isEmpty ? '(onbekend)' : message.speakerName,
+              message.speakerName.isEmpty ? '(unknown)' : message.speakerName,
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
             ),
             if (message.flavor.isNotEmpty)

@@ -17,18 +17,22 @@ class SheetTemplateContext {
   /// instead of a raw leaf value.
   final void Function({required String title, required String defaultFormula, required String defaultFlavor}) onRoll;
 
-  /// Opens the existing +/- adjust dialog for the field at [path].
-  final void Function(String path, num value) onAdjust;
+  /// Opens the existing +/- adjust dialog for the field at [path]. Writes
+  /// to the actor unless [targetUuid] is given — pass an embedded item's own
+  /// UUID (`'$uuid.Item.<itemId>'`) to scope the write to that item instead
+  /// (confirmed live: the actor's UUID can't dot-path into `items[]` since
+  /// it's an embedded collection, but the item's own UUID resolves directly).
+  final void Function(String path, num value, {String? targetUuid}) onAdjust;
 
   /// Applies [delta] to the field at [path] immediately, no dialog — for
   /// dedicated -/+ buttons (e.g. HP) where a quick ±1 is the common case.
   /// Tapping the value itself should still go through [onAdjust] for custom
-  /// amounts.
-  final void Function(String path, num delta) onQuickAdjust;
+  /// amounts. Same [targetUuid] item-scoping as [onAdjust].
+  final void Function(String path, num delta, {String? targetUuid}) onQuickAdjust;
 
   /// Opens the existing edit dialog (string) / toggles it (bool) for the
-  /// field at [path].
-  final void Function(String path, dynamic currentValue) onEditLeaf;
+  /// field at [path]. Same [targetUuid] item-scoping as [onAdjust].
+  final void Function(String path, dynamic currentValue, {String? targetUuid}) onEditLeaf;
 
   /// The full generic, system-agnostic tree — every template embeds this
   /// somewhere (typically collapsed, as "raw data") so nothing a template

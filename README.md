@@ -25,19 +25,23 @@ Talks to a self-hosted
   character (name + portrait), not a generic API user.
 - **Writable sheet** — long-press any numeric leaf for a +/- adjust dialog
   (`POST /increase`/`/decrease`); tap any string/bool leaf to edit it in
-  place (`PUT /update`). A **Condities** row above the tree shows active
+  place (`PUT /update`). A **Conditions** row above the tree shows active
   effects and lets you add/remove them (`GET /effects`, `GET /effects/list`,
   `POST`/`DELETE /effects`). Same generic mechanism covers HP, resources,
-  spell slots, and item fields — see "Why generic leaf-editing" below.
+  spell slots, and item fields (including fields on embedded Items, via
+  their own UUID — see "Why an optional sheet template" below) — see "Why
+  generic leaf-editing" below.
 - **Live chat** (`lib/screens/chat_screen.dart`) — loads recent history via
   `GET /chat`, then streams new messages live.
 - **Optional per-system sheet template** (`lib/sheet_templates/`) — when the
   connected world's system is recognized, the actor screen renders a
-  purpose-built, traditional-looking sheet instead of the generic tree
-  (header, HP, AC, ability scores, saves, skills, currency, items); the
-  generic tree is still there underneath, collapsed as "Ruwe data," and is
-  the fallback for any system without a template. `Dnd5eSheetTemplate` is
-  the reference implementation — see "Why an optional sheet template" below.
+  purpose-built, traditional-looking sheet instead of the generic tree: a
+  fixed header/HP/AC/ability-score summary, then a tab bar (Skills & Saves,
+  Inventory, Spells, Features, Raw Data). The generic tree is still there
+  underneath, unfiltered, as the "Raw Data" tab — the fallback for any
+  system without a template, and the guarantee that a template never hides
+  data it doesn't specifically surface. `Dnd5eSheetTemplate` is the
+  reference implementation — see "Why an optional sheet template" below.
 
 ## Why SSE instead of `web_socket_channel`
 
@@ -113,6 +117,40 @@ deliberately conservative: it ignores arbitrary `bonuses.check`/`.save`
 formula strings rather than evaluate untrusted formulas, and only computes
 AC for the common `calc: "default"` case, showing the raw value or "—"
 otherwise instead of a guessed-wrong number.
+
+### Inventory/Spells/Features, Tidy 5e Sheets-inspired
+
+Foundry stores gear, spells, and class/race/background features all as the
+same `Item` document type, distinguished only by `item.type` — so an
+early version of this template that just listed `items[]` lumped a sword,
+a spell, and a racial trait together under one generic "Items" heading.
+Viewing a real, 28-item D&D Beyond-imported character made that obviously
+wrong. Fixed by researching
+[`kgar/foundry-vtt-tidy-5e-sheets`](https://github.com/kgar/foundry-vtt-tidy-5e-sheets)
+(the actively maintained Tidy 5e Sheets fork) as a layout reference and
+borrowing its *organizational structure* — not a pixel clone, and not its
+desktop-only features (grid view, drag-drop, search): a persistent
+header/summary, then tabs for Skills & Saves, Inventory (grouped by item
+type: Weapons/Equipment/Consumables/Tools/Containers/Loot), Spells (grouped
+by level, cantrips first), and Features (grouped by
+race/background/class/feat). `lib/sheet_templates/dnd5e_item_categories.dart`
+does the bucketing as a pure, unit-tested function, with an explicit
+"other" fallback per category so an unrecognized `item.type` is never
+silently dropped — the same "always show everything" guarantee "Raw Data"
+already makes.
+
+Making the new Inventory/Spells tabs interactive (quantity, equipped,
+prepared) surfaced a real relay quirk: an actor's own `/update` with a
+dot-path like `items.<id>.system.quantity` silently no-ops, because `items`
+is an embedded collection needing `updateEmbeddedDocuments`, not a flat
+actor property — confirmed live via curl. But the same generic
+`/update`/`/increase`/`/decrease` `uuid` parameter also accepts an **item's
+own UUID** (`Actor.<actorId>.Item.<itemId>`) and edits it directly —
+confirmed live (`quantity` 1→7). `ActorSheetScreen` and
+`SheetTemplateContext`'s adjust/edit-leaf methods gained an optional
+`targetUuid` (defaulting to the actor) so item-scoped edits reuse the exact
+same generic mechanism as everything else, no new relay-client methods
+needed.
 
 ## Other things confirmed from source rather than assumed
 
@@ -309,9 +347,50 @@ tapping an ability card now produces a chat message headed with the
 character's name, both on the relay (`speaker.alias`) and in the app's own
 chat screen.
 
+## Phase 1.5b (tabbed Inventory/Spells/Features) — also verified live
+
+Same disposable-actor pattern: a "Tab Layout Probe" actor (one weapon, one
+consumable, one cantrip, one 3rd-level spell, and a race/class/feat feature
+each) was created via `POST /create`, driven through the rebuilt app via
+`adb`/`uiautomator`, and left for cleanup (see `TODO.md`).
+
+**A real UX bug turned up mid-verification**: right after confirming an
+item-scoped edit worked (toggling "equipped" on a weapon via its own item
+UUID — see "Inventory/Spells/Features" above), a follow-up screenshot
+showed the tab bar had silently reset from "Inventory" back to "Skills &
+Saves". Root cause: `ActorSheetScreen` refetched through a
+`FutureBuilder<_SheetData>` with a fresh `Future` on every reload — which
+every successful edit triggers — so `FutureBuilder` briefly hit
+`ConnectionState.waiting` and rendered a full-screen spinner in place of
+the whole body, tearing down and rebuilding the `DefaultTabController`
+(and losing the selected tab) on every single edit. Fixed by replacing the
+`Future`/`FutureBuilder` pair with plain `_data`/`_loadError`/`_initialLoad`
+state: the full-screen spinner now only appears on the very first load,
+and every later reload keeps rendering the previous data (same widget
+subtree, same `TabController`) until the refetch resolves.
+
+With that fixed, verified live via `uiautomator` (dumping the UI tree
+immediately after each edit and checking the tab element's `selected`
+attribute, not just eyeballing a screenshot):
+- **Inventory tab**: toggled the equipped icon on a weapon — tab stayed on
+  "Inventory" afterward, and the icon visually flipped from filled to
+  outlined, matching the toggle.
+- **Spells tab**: grouped correctly into "Cantrips" and "3rd Level (0
+  slots)" (slot count read from `system.spells.spell3.value`); toggled the
+  prepared indicator on the cantrip — tab stayed on "Spells" afterward.
+- **Features tab**: grouped correctly into Race/Class Features/Feats.
+- **Read-only pass against William's real, 28-item sheet**: Inventory
+  correctly grouped his actual gear into Weapons/Tools/Containers; Spells
+  correctly showed only Cantrips (accurate for a level-1 Artificer with no
+  leveled spells yet); Features correctly grouped Race (Tiefling), one
+  Background, and several Class Features/Feats. No edits made to his actor.
+
 ## Remaining before this is more than a PoC
 
-Nothing acceptance-critical is outstanding. Worth doing next: live-test
+Nothing acceptance-critical is outstanding. Worth doing next: delete the
+"Tab Layout Probe" test actor left in the world (blocked only on having the
+live API key in hand — reading it out of the phone's encrypted storage was
+correctly refused as credential materialization), live-test
 item/spell-slot editing and the sheet template against a populated actor,
 implement a `SheetTemplate` for a second system whenever there's a live
 world to test one against, decide whether to report the SSE fixture

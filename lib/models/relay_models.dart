@@ -22,7 +22,7 @@ class FoundryClientInfo {
   factory FoundryClientInfo.fromJson(Map<String, dynamic> json) {
     return FoundryClientInfo(
       clientId: json['clientId'] as String? ?? '',
-      worldTitle: json['worldTitle'] as String? ?? json['worldId'] as String? ?? 'Onbekende wereld',
+      worldTitle: json['worldTitle'] as String? ?? json['worldId'] as String? ?? 'Unknown world',
       systemTitle: json['systemTitle'] as String? ?? json['systemId'] as String? ?? '',
       systemId: json['systemId'] as String?,
       isOnline: json['isOnline'] as bool? ?? false,

@@ -112,6 +112,51 @@ actually usable day-to-day at the table, roughly in this order:
     register it in `SheetTemplateRegistry` — the mechanism is generic, only
     the per-system widget/formula file needs writing. No live system to test
     against yet, so left for whenever there's a second world to point this at.
+- [x] ~~Redesign the dnd5e template into a tabbed, Tidy 5e Sheets-inspired
+      layout, with real gear separated from spells and class/race/background
+      features~~ — done.
+  - Prompted by viewing William's real, 28-item D&D Beyond-imported
+    character: gear, spells, and features are all just Foundry `Item`
+    documents distinguished only by `item.type`, and the old single "Items"
+    list lumped all of it together. Researched `kgar/foundry-vtt-tidy-5e-sheets`
+    (the maintained Tidy 5e Sheets fork) as a layout reference — borrowed its
+    *organizational structure* (a persistent header, then tabs for
+    skills/saves, Inventory grouped by item type, Spells grouped by level,
+    Features grouped by race/background/class/feat), not its desktop-only
+    features (grid view, drag-drop, search), which are out of scope.
+  - New pure categorization function, `categorizeItems()` in
+    `lib/sheet_templates/dnd5e_item_categories.dart` (unit tested,
+    `test/dnd5e_item_categories_test.dart`): buckets an actor's `items[]`
+    into inventory-by-type / spells-by-level / features-by-type, with an
+    explicit "other" fallback bucket per category so an unrecognized
+    `item.type` is never silently dropped — same "always show everything"
+    guarantee the generic tree/"Raw Data" fallback already makes.
+  - `lib/sheet_templates/dnd5e_sheet_template.dart` rewritten around a
+    `DefaultTabController`: the header/HP/AC/ability-score summary stays
+    fixed above the tabs; the rest became 5 tabs (Skills & Saves, Inventory,
+    Spells, Features, Raw Data — the last one still the full, unfiltered
+    `DynamicJsonView`, unchanged as the ultimate fallback).
+  - **New capability, discovered while scoping this**: an actor's own
+    `/update` with a dot-path like `items.<id>.system.quantity` silently
+    no-ops — confirmed live via curl — because `items` is an embedded
+    collection needing `updateEmbeddedDocuments`, not a flat actor property.
+    But targeting the *item's own UUID* directly (`Actor.<actorId>.Item.<itemId>`)
+    through the exact same generic `/update`/`/increase`/`/decrease` `uuid`
+    parameter works correctly (confirmed live: `quantity` 1→7 via curl).
+    Generalized `ActorSheetScreen`'s adjust/edit-leaf methods and
+    `SheetTemplateContext`'s callback types to take an optional
+    `targetUuid` (defaulting to the actor), so the new Inventory tab's
+    quantity/equipped edits and the Spells tab's prepared toggle are fully
+    interactive using this — no new relay-client methods needed, since
+    `adjustAttribute`/`updateField` already take a bare UUID string.
+  - Verified live end-to-end on a disposable "Tab Layout Probe" actor (one
+    weapon, one consumable, one cantrip, one 3rd-level spell, a race/class/feat
+    feature each): tab bucketing correct, quantity/equipped/prepared edits
+    all confirmed via `GET /get` and via the actual app UI (not just curl).
+    Also did a read-only pass against William's real sheet — Inventory
+    (Weapons/Tools/Containers), Spells (Cantrips, correctly empty of leveled
+    spells for an Artificer 1), and Features (Race/Background/Class
+    Features/Feats) all categorized correctly on real, messy imported data.
 
 ### Phase 2 — Player-facing parity with D&D Beyond
 - [ ] Rest handling: short/long rest actions that trigger the right resource resets.
@@ -158,6 +203,25 @@ actually usable day-to-day at the table, roughly in this order:
   - Same pattern as above: created via `POST /create`, used to verify the long-press adjust/edit-leaf/conditions mechanism end-to-end on-device, removed via `DELETE /delete?uuid=Actor.skQGXYD99SldXJtF` once done. Test world has no actors again.
 - [x] ~~Clean up the "Sheet Template Test" probe actor created to live-verify the dnd5e sheet template~~ — deleted.
   - Same pattern as the previous two: created via `POST /create` (with a `str`/`dex`/embedded `Fighter` class item for checkable math), used to verify the template end-to-end on-device, removed via `DELETE /delete?uuid=Actor.chITmcD0lxtKXirM`. Test world has no actors again.
+- [x] ~~Translate the remaining Dutch UI strings (dialog labels, error
+      messages, tooltips) to English~~ — done.
+  - Audited the whole `lib/` tree, not just widget `Text()` — included
+    `RelayException` messages in `relay_client.dart`, which surface
+    directly as SnackBar text and are just as user-facing. Covered
+    `config_screen.dart`, `actor_picker_screen.dart`, `chat_screen.dart`,
+    `actor_sheet_screen.dart` (every dialog), `relay_models.dart`'s
+    "Unknown world" fallback, and the dnd5e template's "Raw Data"/"AC (see
+    raw data)" strings. `test/widget_test.dart` updated to match the
+    renamed "Relay URL" field label.
+- [ ] Delete the "Tab Layout Probe" test actor (`Actor.PkanG6DRZOSDeUQk`)
+      from the test world now that the tabbed-layout work above is verified
+      — same pattern as the other probe actors above (`DELETE /delete`), but
+      not done yet: doing it via curl needs the live API key, which lives
+      only in the phone's encrypted `flutter_secure_storage` and was
+      correctly refused when reading it directly off the device was
+      attempted (credential materialization). Delete it the same way as
+      before (ask for the key, or delete via Foundry's own UI) next time
+      there's a live pass against the relay.
 - [ ] Consider reporting the SSE fixture mismatch upstream to ThreeHats (`foundryvtt-rest-api-relay`) — see Bugs below.
 - [ ] Explore the relay endpoints not yet touched by the app: `GET /rolls`/`GET /lastroll` (roll history), `/structure` + folders (for actor organization once there's more than one). (`GET /sheet` was explored — it's a PNG/JPEG screenshot, not JSON; see Phase 1 above. Could still be worth showing as a supplementary visual, but it's not a data source.)
 - [ ] Live-test the generic leaf-editing mechanism (Phase 1) against an actor that actually has items and prepared spells — the probe actor used to verify it was a fresh level-1 character with neither, so `items[i].system.quantity/equipped` and `system.spells.spell1-9` edits are implemented but not independently confirmed live yet.
@@ -202,6 +266,30 @@ actually usable day-to-day at the table, roughly in this order:
   - Diagnosis took real bisection since normal tools didn't help: `flutter analyze`/`flutter test` were clean (this is a *runtime layout* issue, not a static/build one); a `try/catch` wrapped around the template's `build()` caught nothing (the throw happens during the later *layout* pass, not while the widget tree is being constructed); logcat showed nothing under any tag. What worked: replacing the real body with a trivial `Center(Text(...))` to confirm the wiring (`Expanded`/`Column` in `ActorSheetScreen`) was fine, then adding pieces of the real content back one at a time until the exact widget that reintroduced the blank screen was found.
   - Fix: wrap that `Row` in `IntrinsicHeight`, which gives it a bounded height computed from its children's intrinsic height, letting `stretch` work safely — `lib/sheet_templates/dnd5e_sheet_template.dart`.
   - Also kept a `try/catch` around `Dnd5eSheetTemplate.build()` regardless (falls back to the generic tree on any exception) — doesn't catch layout-phase issues like this one, but is still worth having for genuine data-shape/build-time surprises on unusual actors.
+- [x] ~~Tab selection reset to the first tab ("Skills & Saves") after every
+      single edit on the new dnd5e tabbed sheet~~ — fixed.
+  - Found live, immediately after verifying the new item-scoped equipped
+    toggle worked: a follow-up screenshot showed the tab bar back on
+    "Skills & Saves" even though the edit had been made from "Inventory".
+  - Root cause: `ActorSheetScreen` refetched via `FutureBuilder<_SheetData>`
+    with a fresh `Future` assigned on every `_load()` call (which every
+    successful edit/roll triggers, alongside pull-to-refresh) — a fresh
+    `Future` means `FutureBuilder` briefly returns to
+    `ConnectionState.waiting`, which was rendered as a full-screen spinner
+    replacing the whole body. That tore down and rebuilt the entire widget
+    subtree including `DefaultTabController`, resetting to tab index 0
+    every time — invisible until the sheet actually had tabs to lose.
+  - Fix: replaced the `Future<_SheetData>?`/`FutureBuilder` pattern with
+    plain `_data`/`_loadError`/`_initialLoad` state fields. `build()` now
+    only shows the full-screen spinner on the very first load
+    (`_data == null && _initialLoad`); every subsequent `_load()` keeps
+    rendering the previous `_data` (same widget subtree, same
+    `TabController`) until the refetch resolves, with a non-blocking
+    orange banner if a background refresh fails instead of blanking the
+    screen. Verified live via `uiautomator`: tapped Inventory → edited the
+    equipped toggle on "Test Sword" → dumped the UI tree immediately after
+    → the Inventory tab was still `selected="true"`. Also confirmed on the
+    Spells tab's prepared-toggle edit.
 - [ ] Whisper/private messages, and non-`base` chat message types (emote, OOC, in-character) haven't been exercised — `ChatMessage.fromJson` should handle them (same shape, different `type`/`whisper` fields) but this is untested against a real whisper.
 - [ ] No retry/backoff on a genuinely dead relay (e.g. relay container restarts) beyond the manual "Opnieuw verbinden" button on the chat screen — worth revisiting if this becomes more than a PoC.
 

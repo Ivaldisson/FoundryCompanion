@@ -46,13 +46,13 @@ class RelayClient {
   Map<String, dynamic> _requireData(Response res) {
     final body = res.data;
     if (body is! Map<String, dynamic>) {
-      throw RelayException('Onverwacht antwoord van de relay (geen JSON-object).');
+      throw RelayException('Unexpected response from the relay (not a JSON object).');
     }
     if (body.containsKey('error')) {
       throw RelayException(body['error'].toString());
     }
     if (body['success'] == false) {
-      throw RelayException(body['error']?.toString() ?? 'Relay meldde een fout.');
+      throw RelayException(body['error']?.toString() ?? 'The relay reported an error.');
     }
     return body;
   }
@@ -63,9 +63,9 @@ class RelayClient {
       throw RelayException(data['error'].toString());
     }
     if (e.response != null) {
-      throw RelayException('Relay antwoordde met status ${e.response!.statusCode}.');
+      throw RelayException('Relay responded with status ${e.response!.statusCode}.');
     }
-    throw RelayException('Kan geen verbinding maken met de relay: ${e.message}');
+    throw RelayException('Could not connect to the relay: ${e.message}');
   }
 
   Future<List<FoundryClientInfo>> getClients() async {
@@ -111,7 +111,7 @@ class RelayClient {
       final body = _requireData(res);
       final data = body['data'];
       if (data is! Map<String, dynamic>) {
-        throw RelayException('Relay gaf geen entity-data terug voor $uuid.');
+        throw RelayException('Relay did not return entity data for $uuid.');
       }
       return data;
     } on DioException catch (e) {
@@ -140,7 +140,7 @@ class RelayClient {
       final data = body['data'] as Map<String, dynamic>?;
       final roll = data?['roll'] as Map<String, dynamic>?;
       if (roll == null) {
-        throw RelayException('Relay gaf geen rollresultaat terug.');
+        throw RelayException('Relay did not return a roll result.');
       }
       return RollInfo.fromJson(roll);
     } on DioException catch (e) {
@@ -334,7 +334,7 @@ class RelayClient {
         await controller.close();
       } catch (e) {
         if (!controller.isClosed) {
-          controller.addError(RelayException('Chat-stream verbroken: $e'));
+          controller.addError(RelayException('Chat stream disconnected: $e'));
           await controller.close();
         }
       }

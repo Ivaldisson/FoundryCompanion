@@ -28,7 +28,19 @@ class ActorSheetScreen extends StatefulWidget {
 
 class _ActorSheetScreenState extends State<ActorSheetScreen> {
   late final RelayClient _client;
-  Future<_SheetData>? _future;
+
+  // Deliberately not a plain FutureBuilder-driven `Future<_SheetData>?`:
+  // every edit (roll aside) calls `_load()` to refetch, and with a fresh
+  // Future each time, FutureBuilder briefly hits ConnectionState.waiting —
+  // which would replace the whole body with a spinner, tearing down and
+  // recreating the dnd5e template's DefaultTabController and silently
+  // resetting the user back to the first tab after every single edit.
+  // Confirmed live: exactly this happened once the sheet grew tabs. Instead,
+  // keep showing the last good `_data` while a reload is in flight — same
+  // widget subtree, same TabController, tab selection survives.
+  _SheetData? _data;
+  String? _loadError;
+  bool _initialLoad = true;
 
   @override
   void initState() {
@@ -37,10 +49,22 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
     _load();
   }
 
-  void _load() {
-    setState(() {
-      _future = _loadAll();
-    });
+  Future<void> _load() async {
+    try {
+      final data = await _loadAll();
+      if (!mounted) return;
+      setState(() {
+        _data = data;
+        _loadError = null;
+        _initialLoad = false;
+      });
+    } on RelayException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = e.message;
+        _initialLoad = false;
+      });
+    }
   }
 
   Future<_SheetData> _loadAll() async {
@@ -67,7 +91,8 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
   /// under [title]. Used both for a tapped numeric leaf (title/formula
   /// derived from its raw value) and for a sheet template's computed rolls
   /// (e.g. `1d20 + <ability mod>`) — the dialog itself doesn't care where
-  /// the default came from.
+  /// the default came from. Rolls are always attributed to the actor being
+  /// viewed (not item-scoped — an item doesn't "speak" a roll).
   Future<void> _openRollDialogFor({
     required String title,
     required String defaultFormula,
@@ -85,18 +110,18 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
           children: [
             TextField(
               controller: formulaController,
-              decoration: const InputDecoration(labelText: 'Formule', border: OutlineInputBorder()),
+              decoration: const InputDecoration(labelText: 'Formula', border: OutlineInputBorder()),
               autofocus: true,
             ),
             const SizedBox(height: 8),
             TextField(
               controller: flavorController,
-              decoration: const InputDecoration(labelText: 'Flavor tekst', border: OutlineInputBorder()),
+              decoration: const InputDecoration(labelText: 'Flavor text', border: OutlineInputBorder()),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuleer')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           FilledButton.icon(
             icon: const Icon(Icons.casino),
             onPressed: () => Navigator.pop(context, formulaController.text),
@@ -145,17 +170,24 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
   /// relay's dedicated `/increase`/`/decrease` endpoints — same JSON [path]
   /// the roll dialog uses, so this works for any numeric field on any
   /// system (HP, spell slots, item quantity, currency, ...) identically.
-  Future<void> _openAdjustDialog(String path, num value) async {
+  ///
+  /// [targetUuid] defaults to the actor being viewed; a sheet template can
+  /// override it to scope the write to an embedded item instead (e.g.
+  /// `'${actorUuid}.Item.${itemId}'`) — confirmed live that `/update` (and,
+  /// by the same mechanism, `/increase`/`/decrease`) resolves an item's own
+  /// UUID and edits that document directly, since `items` is an embedded
+  /// collection the actor's own UUID can't dot-path into.
+  Future<void> _openAdjustDialog(String path, num value, {String? targetUuid}) async {
     final amountController = TextEditingController(text: '1');
 
     final delta = await showDialog<num>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Aanpassen — $path'),
+        title: Text('Adjust — $path'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Huidige waarde: $value', style: const TextStyle(color: Colors.grey)),
+            Text('Current value: $value', style: const TextStyle(color: Colors.grey)),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -171,7 +203,7 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
                     controller: amountController,
                     keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
                     textAlign: TextAlign.center,
-                    decoration: const InputDecoration(labelText: 'Bedrag', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(labelText: 'Amount', border: OutlineInputBorder()),
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -184,31 +216,32 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuleer')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           FilledButton(
             onPressed: () {
               final custom = num.tryParse(amountController.text.trim().replaceAll(',', '.'));
               Navigator.pop(context, custom);
             },
-            child: const Text('Toepassen'),
+            child: const Text('Apply'),
           ),
         ],
       ),
     );
 
     if (delta == null || delta == 0 || !mounted) return;
-    await _applyAdjust(path, delta);
+    await _applyAdjust(path, delta, targetUuid: targetUuid);
   }
 
   /// Applies [delta] to [path] with no dialog — for a sheet template's
   /// dedicated -/+ buttons (e.g. HP), where a quick ±1 is the common case
   /// and a confirmation step would just be friction. Shares the same
   /// underlying call as the dialog-driven `_openAdjustDialog` above.
-  Future<void> _quickAdjust(String path, num delta) => _applyAdjust(path, delta);
+  Future<void> _quickAdjust(String path, num delta, {String? targetUuid}) =>
+      _applyAdjust(path, delta, targetUuid: targetUuid);
 
-  Future<void> _applyAdjust(String path, num delta) async {
+  Future<void> _applyAdjust(String path, num delta, {String? targetUuid}) async {
     try {
-      await _client.adjustAttribute(widget.uuid, path, delta);
+      await _client.adjustAttribute(targetUuid ?? widget.uuid, path, delta);
       _load();
     } on RelayException catch (e) {
       _showError(e.message);
@@ -217,11 +250,13 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
 
   /// Tap on a string/bool leaf: bools toggle straight away, strings open a
   /// small edit dialog. Both go through `PUT /update` with the same JSON
-  /// [path] — no per-field knowledge needed.
-  Future<void> _onEditLeaf(String path, dynamic currentValue) async {
+  /// [path] — no per-field knowledge needed. [targetUuid] defaults to the
+  /// actor; see `_openAdjustDialog`'s doc comment for the item-scoped case.
+  Future<void> _onEditLeaf(String path, dynamic currentValue, {String? targetUuid}) async {
+    final uuid = targetUuid ?? widget.uuid;
     if (currentValue is bool) {
       try {
-        await _client.updateField(widget.uuid, path, !currentValue);
+        await _client.updateField(uuid, path, !currentValue);
         _load();
       } on RelayException catch (e) {
         _showError(e.message);
@@ -233,7 +268,7 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
     final newText = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Bewerken — $path'),
+        title: Text('Edit — $path'),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -241,10 +276,10 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
           decoration: const InputDecoration(border: OutlineInputBorder()),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuleer')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           FilledButton(
             onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Opslaan'),
+            child: const Text('Save'),
           ),
         ],
       ),
@@ -253,7 +288,7 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
     if (newText == null || !mounted) return;
 
     try {
-      await _client.updateField(widget.uuid, path, newText);
+      await _client.updateField(uuid, path, newText);
       _load();
     } on RelayException catch (e) {
       _showError(e.message);
@@ -273,12 +308,12 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
     final chosen = await showDialog<EffectDefinition>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Conditie toevoegen'),
+        title: const Text('Add condition'),
         content: SizedBox(
           width: double.maxFinite,
           height: 400,
           child: options.isEmpty
-              ? const Center(child: Text('Geen condities beschikbaar voor dit systeem.'))
+              ? const Center(child: Text('No conditions available for this system.'))
               : ListView.builder(
                   itemCount: options.length,
                   itemBuilder: (context, i) {
@@ -292,7 +327,7 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
                 ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuleer')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         ],
       ),
     );
@@ -328,7 +363,7 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
         title: Text(widget.name),
         actions: [
           IconButton(
-            tooltip: 'Chatlog',
+            tooltip: 'Chat log',
             icon: const Icon(Icons.chat_bubble_outline),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ChatScreen()),
@@ -337,83 +372,91 @@ class _ActorSheetScreenState extends State<ActorSheetScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () async => _load(),
-        child: FutureBuilder<_SheetData>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              final message = snapshot.error is RelayException
-                  ? (snapshot.error as RelayException).message
-                  : '${snapshot.error}';
-              return ListView(
-                children: [
-                  const SizedBox(height: 60),
-                  Icon(Icons.error_outline, size: 40, color: Colors.red[300]),
-                  const SizedBox(height: 12),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Text(message, textAlign: TextAlign.center),
-                  ),
-                ],
-              );
-            }
-            final data = snapshot.data!;
-            final rawDataView = DynamicJsonView(
-              value: data.actor,
-              path: '',
-              label: widget.name,
-              onTapNumber: _openRollForLeaf,
-              onLongPressNumber: _openAdjustDialog,
-              onEditLeaf: _onEditLeaf,
-            );
-            final template = SheetTemplateRegistry.forSystem(context.read<RelayConfig>().systemId);
-
-            return Column(
-              children: [
-                _ConditionsRow(
-                  effects: data.effects,
-                  error: data.effectsError,
-                  onAdd: _openAddConditionDialog,
-                  onRemove: _removeCondition,
-                ),
-                Expanded(
-                  child: template != null
-                      ? template.build(
-                          context,
-                          SheetTemplateContext(
-                            uuid: widget.uuid,
-                            actor: data.actor,
-                            onRoll: _openRollDialogFor,
-                            onAdjust: _openAdjustDialog,
-                            onQuickAdjust: _quickAdjust,
-                            onEditLeaf: _onEditLeaf,
-                            rawDataView: rawDataView,
-                          ),
-                        )
-                      : ListView(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                              child: Text(
-                                'Tik op een getal voor een roll, houd ingedrukt om aan te passen. '
-                                'Tik op tekst/aan-uit om te bewerken. Volledige, onbewerkte actor-JSON — '
-                                'geen system-specifieke velden.',
-                                style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                              ),
-                            ),
-                            rawDataView,
-                          ],
-                        ),
-                ),
-              ],
-            );
-          },
-        ),
+        onRefresh: _load,
+        child: _buildBody(context),
       ),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    final data = _data;
+    if (data == null) {
+      if (_initialLoad) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      final message = _loadError ?? 'Unknown error.';
+      return ListView(
+        children: [
+          const SizedBox(height: 60),
+          Icon(Icons.error_outline, size: 40, color: Colors.red[300]),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(message, textAlign: TextAlign.center),
+          ),
+        ],
+      );
+    }
+
+    final rawDataView = DynamicJsonView(
+      value: data.actor,
+      path: '',
+      label: widget.name,
+      onTapNumber: _openRollForLeaf,
+      onLongPressNumber: _openAdjustDialog,
+      onEditLeaf: _onEditLeaf,
+    );
+    final template = SheetTemplateRegistry.forSystem(context.read<RelayConfig>().systemId);
+
+    return Column(
+      children: [
+        if (_loadError != null)
+          Container(
+            width: double.infinity,
+            color: Colors.orange.withValues(alpha: 0.15),
+            padding: const EdgeInsets.all(8),
+            child: Text(
+              'Could not refresh: $_loadError',
+              style: const TextStyle(color: Colors.deepOrange),
+            ),
+          ),
+        _ConditionsRow(
+          effects: data.effects,
+          error: data.effectsError,
+          onAdd: _openAddConditionDialog,
+          onRemove: _removeCondition,
+        ),
+        Expanded(
+          child: template != null
+              ? template.build(
+                  context,
+                  SheetTemplateContext(
+                    uuid: widget.uuid,
+                    actor: data.actor,
+                    onRoll: _openRollDialogFor,
+                    onAdjust: _openAdjustDialog,
+                    onQuickAdjust: _quickAdjust,
+                    onEditLeaf: _onEditLeaf,
+                    rawDataView: rawDataView,
+                  ),
+                )
+              : ListView(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      child: Text(
+                        'Tap a number to roll, long-press to adjust. '
+                        'Tap text/on-off to edit. Full, unprocessed actor JSON — '
+                        'no system-specific fields.',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                      ),
+                    ),
+                    rawDataView,
+                  ],
+                ),
+        ),
+      ],
     );
   }
 }
@@ -438,7 +481,7 @@ class _ConditionsRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Condities', style: Theme.of(context).textTheme.labelLarge),
+          Text('Conditions', style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 6),
           if (error != null)
             Text(error!, style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic, fontSize: 12))
@@ -454,7 +497,7 @@ class _ConditionsRow extends StatelessWidget {
                   ),
                 ActionChip(
                   avatar: const Icon(Icons.add, size: 16),
-                  label: const Text('Toevoegen'),
+                  label: const Text('Add'),
                   onPressed: onAdd,
                 ),
               ],

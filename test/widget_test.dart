@@ -42,6 +42,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Foundry Companion — Setup'), findsOneWidget);
-    expect(find.widgetWithText(TextField, 'Relay-URL'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Relay URL'), findsOneWidget);
   });
 }
